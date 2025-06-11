@@ -31,33 +31,10 @@ func RunWebServer(options *options.Options) {
 			fingerprints := knowledge.Group("/fingerprints")
 			{
 				// 管理功能
-				fingerprints.GET("", func(c *gin.Context) {
-					gologger.Infoln("收到指纹列表请求")
-
-					// 调用原有的指纹列表实现
-					runner, err := runner.New(options)
-					if err != nil {
-						gologger.Errorf("创建runner失败: %v", err)
-						c.JSON(500, gin.H{
-							"status":  1,
-							"message": err.Error(),
-							"data":    nil,
-						})
-						return
-					}
-					defer runner.Close()
-
-					data := runner.GetFpAndVulList()
-					gologger.Infof("获取到指纹列表数据，长度: %d", len(data))
-
-					response := gin.H{
-						"status":  0,
-						"message": "success",
-						"data":    data,
-					}
-					gologger.Infof("返回数据: %+v", response)
-					c.JSON(200, response)
-				})
+				fingerprints.GET("", HandleListFingerprints)
+				fingerprints.POST("", HandleCreateFingerprint)
+				fingerprints.PUT("/:name", HandleEditFingerprint)
+				fingerprints.DELETE("", HandleDeleteFingerprint)
 			}
 
 			// 漏洞库
