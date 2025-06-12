@@ -5,7 +5,6 @@ import (
 	"mime"
 	"path/filepath"
 
-	"github.com/Tencent/AI-Infra-Guard/common/runner"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/internal/options"
 	"github.com/gin-gonic/gin"
@@ -41,33 +40,10 @@ func RunWebServer(options *options.Options) {
 			vulnerabilities := knowledge.Group("/vulnerabilities")
 			{
 				// 管理功能
-				vulnerabilities.GET("", func(c *gin.Context) {
-					gologger.Infoln("收到漏洞列表请求")
-
-					// 调用原有的漏洞列表实现
-					runner, err := runner.New(options)
-					if err != nil {
-						gologger.Errorf("创建runner失败: %v", err)
-						c.JSON(500, gin.H{
-							"status":  1,
-							"message": err.Error(),
-							"data":    nil,
-						})
-						return
-					}
-					defer runner.Close()
-
-					data := runner.GetFpAndVulList()
-					gologger.Infof("获取到漏洞列表数据，长度: %d", len(data))
-
-					response := gin.H{
-						"status":  0,
-						"message": "success",
-						"data":    data,
-					}
-					// gologger.Infof("返回数据: %+v", response)
-					c.JSON(200, response)
-				})
+				vulnerabilities.GET("", HandleListVulnerabilities(options))
+				vulnerabilities.POST("", HandleCreateVulnerability(options))
+				vulnerabilities.PUT("/:cve", HandleEditVulnerability)
+				vulnerabilities.DELETE("", HandleBatchDeleteVulnerabilities)
 			}
 		}
 
