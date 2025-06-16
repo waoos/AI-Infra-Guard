@@ -2,11 +2,13 @@ package websocket
 
 import (
 	"embed"
+	"log"
 	"mime"
 	"path/filepath"
 
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/internal/options"
+	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,6 +18,17 @@ var staticFS embed.FS
 func RunWebServer(options *options.Options) {
 	r := gin.Default()
 	wsServer := NewWSServer(options)
+
+	// 1. 初始化数据库和AgentStore
+	dbConfig := database.NewConfig("db/agents.db") // 推荐单独目录
+	db, err := database.InitDB(dbConfig)
+	if err != nil {
+		log.Fatalf("数据库初始化失败: %v", err)
+	}
+	agentStore := database.NewAgentStore(db)
+	if err := agentStore.Init(); err != nil {
+		log.Fatalf("初始化agent表失败: %v", err)
+	}
 
 	// API 版本分组
 	v1 := r.Group("/api/v1")
@@ -78,7 +91,11 @@ func RunWebServer(options *options.Options) {
 		}
 
 		// 4. Agent 管理
-		// agents := v1.Group("/agents")
+		agents := v1.Group("/agents")
+		{
+			// 只需要WebSocket入口
+			agents.GET("/ws", HandleAgentWebSocket(agentStore))
+		}
 	}
 
 	// 保持原有路由的兼容性（重定向到新路由）
