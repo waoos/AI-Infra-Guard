@@ -393,6 +393,14 @@ func HandleCreateVulnerability(options *options.Options) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号不能为空"})
 			return
 		}
+		if !isValidName(vul.Info.CVEName) {
+			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号非法"})
+			return
+		}
+		if vul.Info.FingerPrintName != "" && !isValidName(vul.Info.FingerPrintName) {
+			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹分类名称非法"})
+			return
+		}
 
 		// 3. 临时写入到校验用的临时文件
 		tmpDir := "data/vuln/.tmp_check"
@@ -410,13 +418,8 @@ func HandleCreateVulnerability(options *options.Options) gin.HandlerFunc {
 
 		// 5. 校验通过后，正式写入到目标目录（如已存在则报冲突）
 		dir := "data/vuln"
-		if vul.Info.FingerPrintName != "" && !isValidName(vul.Info.FingerPrintName) {
-			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹分类名称非法"})
-			return
-		}
-		if !isValidName(vul.Info.CVEName) {
-			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号非法"})
-			return
+		if vul.Info.FingerPrintName != "" {
+			dir = filepath.Join(dir, vul.Info.FingerPrintName)
 		}
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"status": 1, "message": "创建目录失败: " + err.Error()})
@@ -451,6 +454,10 @@ func HandleEditVulnerability(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号不能为空"})
 		return
 	}
+	if !isValidName(oldCVE) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "原CVE编号非法"})
+		return
+	}
 
 	type VulnUploadRequest struct {
 		FileContent string `json:"file_content" binding:"required"`
@@ -468,6 +475,14 @@ func HandleEditVulnerability(c *gin.Context) {
 	}
 	if vul.Info.CVEName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号不能为空"})
+		return
+	}
+	if !isValidName(vul.Info.CVEName) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号非法"})
+		return
+	}
+	if vul.Info.FingerPrintName != "" && !isValidName(vul.Info.FingerPrintName) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹分类名称非法"})
 		return
 	}
 
@@ -504,18 +519,6 @@ func HandleEditVulnerability(c *gin.Context) {
 
 	// 6. 生成新文件路径
 	newDir := "data/vuln"
-	if vul.Info.FingerPrintName != "" && !isValidName(vul.Info.FingerPrintName) {
-		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹分类名称非法"})
-		return
-	}
-	if !isValidName(vul.Info.CVEName) {
-		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号非法"})
-		return
-	}
-	if !isValidName(oldCVE) {
-		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "原CVE编号非法"})
-		return
-	}
 	if vul.Info.FingerPrintName != "" {
 		newDir = filepath.Join(newDir, vul.Info.FingerPrintName)
 	}
