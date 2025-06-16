@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
+
+// 合法性校验
+var validName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+func isValidName(name string) bool {
+	return validName.MatchString(name)
+}
 
 // 获取指纹列表，支持分页和名字模糊
 func HandleListFingerprints(c *gin.Context) {
@@ -148,6 +156,10 @@ func HandleCreateFingerprint(c *gin.Context) {
 	}
 
 	// 3. 检查指纹名称是否已存在
+	if !isValidName(fp.Info.Name) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹名称非法"})
+		return
+	}
 	yamlPath := filepath.Join("data/fingerprints", fp.Info.Name+".yaml")
 	if _, err := os.Stat(yamlPath); err == nil {
 		c.JSON(http.StatusConflict, gin.H{"status": 1, "message": "指纹已存在"})
@@ -180,6 +192,10 @@ func HandleDeleteFingerprint(c *gin.Context) {
 	var notFound []string
 
 	for _, name := range req.Names {
+		if !isValidName(name) {
+			notFound = append(notFound, name)
+			continue
+		}
 		yamlPath := filepath.Join("data/fingerprints", name+".yaml")
 		if _, err := os.Stat(yamlPath); os.IsNotExist(err) {
 			notFound = append(notFound, name)
@@ -240,6 +256,10 @@ func HandleEditFingerprint(c *gin.Context) {
 	}
 
 	// 3. 校验原文件是否存在
+	if !isValidName(oldName) || !isValidName(fp.Info.Name) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹名称非法"})
+		return
+	}
 	oldPath := filepath.Join("data/fingerprints", oldName+".yaml")
 	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, gin.H{"status": 1, "message": "原指纹不存在"})
@@ -390,8 +410,13 @@ func HandleCreateVulnerability(options *options.Options) gin.HandlerFunc {
 
 		// 5. 校验通过后，正式写入到目标目录（如已存在则报冲突）
 		dir := "data/vuln"
-		if vul.Info.FingerPrintName != "" {
-			dir = filepath.Join(dir, vul.Info.FingerPrintName)
+		if vul.Info.FingerPrintName != "" && !isValidName(vul.Info.FingerPrintName) {
+			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹分类名称非法"})
+			return
+		}
+		if !isValidName(vul.Info.CVEName) {
+			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号非法"})
+			return
 		}
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"status": 1, "message": "创建目录失败: " + err.Error()})
@@ -479,6 +504,18 @@ func HandleEditVulnerability(c *gin.Context) {
 
 	// 6. 生成新文件路径
 	newDir := "data/vuln"
+	if vul.Info.FingerPrintName != "" && !isValidName(vul.Info.FingerPrintName) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "指纹分类名称非法"})
+		return
+	}
+	if !isValidName(vul.Info.CVEName) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "CVE编号非法"})
+		return
+	}
+	if !isValidName(oldCVE) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "原CVE编号非法"})
+		return
+	}
 	if vul.Info.FingerPrintName != "" {
 		newDir = filepath.Join(newDir, vul.Info.FingerPrintName)
 	}
@@ -533,6 +570,10 @@ func HandleBatchDeleteVulnerabilities(c *gin.Context) {
 	var failed []string
 
 	for _, cve := range req.CVEs {
+		if !isValidName(cve) {
+			notFound = append(notFound, cve)
+			continue
+		}
 		found := false
 		_ = filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
 			if err == nil && !info.IsDir() && strings.EqualFold(info.Name(), strings.ToUpper(cve)+".yaml") {
