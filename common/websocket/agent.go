@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"gorm.io/datatypes"
 )
 
 const (
@@ -73,12 +74,13 @@ func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
 			// 处理注册请求
 			if req.Type == "register" {
 				// 创建agent记录
+				capabilitiesJSON, _ := json.Marshal(req.Content.Capabilities)
 				agent := &database.Agent{
 					ID:           req.Content.AgentID,
 					Hostname:     req.Content.Hostname,
 					IP:           req.Content.IP,
 					Version:      req.Content.Version,
-					Capabilities: req.Content.Capabilities,
+					Capabilities: datatypes.JSON(capabilitiesJSON),
 					Meta:         req.Content.Meta,
 				}
 
