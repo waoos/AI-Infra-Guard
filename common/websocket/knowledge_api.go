@@ -382,7 +382,7 @@ func HandleCreateVulnerability(options *options.Options) gin.HandlerFunc {
 
 		// 4. 用vulstruct.NewAdvisoryEngine加载临时文件做完整业务校验
 		_, err := vulstruct.NewAdvisoryEngine(tmpFile)
-		_ = os.Remove(tmpFile)
+		_ = os.RemoveAll(tmpDir) // 删除整个临时目录
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "漏洞内容校验失败: " + err.Error()})
 			return
@@ -454,7 +454,7 @@ func HandleEditVulnerability(c *gin.Context) {
 
 	// 4. 用vulstruct.NewAdvisoryEngine加载临时文件做完整业务校验
 	_, err := vulstruct.NewAdvisoryEngine(tmpFile)
-	_ = os.Remove(tmpFile)
+	_ = os.RemoveAll(tmpDir) // 删除整个临时目录
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "漏洞内容校验失败: " + err.Error()})
 		return
