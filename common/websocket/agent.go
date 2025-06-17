@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -12,27 +13,42 @@ import (
 
 const (
 	// WebSocket相关常量
-	maxMessageSize = 512 * 1024 // 512KB
-	pongWait       = 60 * time.Second
-	writeWait      = 10 * time.Second
+	maxMessageSize        = 512 * 1024 // 512KB
+	pongWait              = 60 * time.Second
+	writeWait             = 10 * time.Second
+	WSMsgTypeRegister     = "register"
+	WSMsgTypeHeartbeat    = "heartbeat"
+	WSMsgTypeTaskProgress = "task_progress"
+	WSMsgTypeTaskResult   = "task_result"
 )
 
-var agentID string
-
-// AgentRegisterRequest 表示agent注册请求
-type AgentRegisterRequest struct {
-	Type    string `json:"type"`
-	Content struct {
-		AgentID      string   `json:"agent_id"`
-		Hostname     string   `json:"hostname"`
-		IP           string   `json:"ip"`
-		Version      string   `json:"version"`
-		Capabilities []string `json:"capabilities"`
-		Meta         string   `json:"meta"`
-	} `json:"content"`
+// 注册/心跳消息内容
+type AgentRegisterContent struct {
+	AgentID      string   `json:"agent_id"`
+	Hostname     string   `json:"hostname,omitempty"`
+	IP           string   `json:"ip,omitempty"`
+	Version      string   `json:"version,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Meta         string   `json:"meta,omitempty"`
 }
 
-// AgentRegisterResponse 表示agent注册响应
+// 任务进度消息内容
+type TaskProgressContent struct {
+	AgentID  string `json:"agent_id"`
+	TaskID   string `json:"task_id"`
+	Progress int    `json:"progress"`
+	Log      string `json:"log"`
+}
+
+// 任务结果消息内容
+type TaskResultContent struct {
+	AgentID string      `json:"agent_id"`
+	TaskID  string      `json:"task_id"`
+	Status  string      `json:"status"`
+	Result  interface{} `json:"result"`
+}
+
+// 注册响应结构体（如需）
 type AgentRegisterResponse struct {
 	Type    string `json:"type"`
 	Content struct {
@@ -40,6 +56,8 @@ type AgentRegisterResponse struct {
 		Message string `json:"message"`
 	} `json:"content"`
 }
+
+var agentID string
 
 // HandleAgentWebSocket 处理agent的WebSocket连接
 func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
@@ -70,53 +88,59 @@ func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
 			if err != nil {
 				break
 			}
-
-			// 解析消息
-			var req AgentRegisterRequest
-			if err := json.Unmarshal(message, &req); err != nil {
+			var wsMsg WSMessage
+			if err := json.Unmarshal(message, &wsMsg); err != nil {
 				sendError(conn, "消息格式错误")
 				continue
 			}
-
-			// 处理注册请求
-			if req.Type == "register" {
-				agentID = req.Content.AgentID
-				// 创建agent记录
-				capabilitiesJSON, _ := json.Marshal(req.Content.Capabilities)
+			switch wsMsg.Type {
+			case WSMsgTypeRegister:
+				contentBytes, _ := json.Marshal(wsMsg.Content)
+				var reg AgentRegisterContent
+				json.Unmarshal(contentBytes, &reg)
+				capabilitiesJSON, _ := json.Marshal(reg.Capabilities)
 				agent := &database.Agent{
-					ID:           req.Content.AgentID,
-					Hostname:     req.Content.Hostname,
-					IP:           req.Content.IP,
-					Version:      req.Content.Version,
+					ID:           reg.AgentID,
+					Hostname:     reg.Hostname,
+					IP:           reg.IP,
+					Version:      reg.Version,
 					Capabilities: datatypes.JSON(capabilitiesJSON),
-					Meta:         req.Content.Meta,
+					Meta:         reg.Meta,
 					Online:       true,
 				}
-
-				// 保存到数据库
 				if err := agentStore.Register(agent); err != nil {
-					sendError(conn, "注册失败: "+err.Error())
+					sendError(conn, "注册失败"+err.Error())
 					continue
 				}
-
-				// 发送成功响应
-				response := AgentRegisterResponse{
+				agentID = reg.AgentID
+				response := WSMessage{
 					Type: "register_ack",
+					Content: Response{
+						Status:  0,
+						Message: "注册成功",
+						Data:    nil,
+					},
 				}
-				response.Content.Status = 0
-				response.Content.Message = "注册成功"
-
 				if err := conn.WriteJSON(response); err != nil {
-					break
+					gologger.Errorf("发送注册响应失败: %v", err)
 				}
-			}
+			case WSMsgTypeHeartbeat:
+				contentBytes, _ := json.Marshal(wsMsg.Content)
+				var hb AgentRegisterContent
+				json.Unmarshal(contentBytes, &hb)
+				agentStore.UpdateLastSeen(hb.AgentID)
+				agentStore.UpdateOnlineStatus(hb.AgentID, true)
 
-			// 处理心跳消息
-			if req.Type == "heartbeat" {
-				agentStore.UpdateLastSeen(req.Content.AgentID)
-				agentStore.UpdateOnlineStatus(req.Content.AgentID, true)
-				// 可选：回复心跳ack
-				continue
+			case WSMsgTypeTaskProgress:
+				contentBytes, _ := json.Marshal(wsMsg.Content)
+				var prog TaskProgressContent
+				json.Unmarshal(contentBytes, &prog)
+				// ...进度逻辑...
+			case WSMsgTypeTaskResult:
+				contentBytes, _ := json.Marshal(wsMsg.Content)
+				var res TaskResultContent
+				json.Unmarshal(contentBytes, &res)
+				// ...结果逻辑...
 			}
 		}
 	}
@@ -124,10 +148,13 @@ func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
 
 // sendError 发送错误响应
 func sendError(conn *websocket.Conn, message string) {
-	response := AgentRegisterResponse{
+	response := WSMessage{
 		Type: "register_ack",
+		Content: Response{
+			Status:  1,
+			Message: message,
+			Data:    nil,
+		},
 	}
-	response.Content.Status = 1
-	response.Content.Message = message
 	conn.WriteJSON(response)
 }

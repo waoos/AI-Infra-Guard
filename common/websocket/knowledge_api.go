@@ -8,6 +8,7 @@ package websocket
 // 替换为实际指纹结构体路径
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -357,6 +358,29 @@ func HandleListVulnerabilities(options *options.Options) gin.HandlerFunc {
 	}
 }
 
+// createTempFileWithContent 创建一个临时文件并写入内容
+// 返回临时文件路径和一个清理函数
+func createTempFileWithContent(prefix string, content []byte) (string, func(), error) {
+	// 创建临时文件
+	tmpFile, err := os.CreateTemp("", prefix)
+	if err != nil {
+		return "", nil, fmt.Errorf("创建临时文件失败: %w", err)
+	}
+
+	// 写入内容
+	if err := os.WriteFile(tmpFile.Name(), content, 0600); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", nil, fmt.Errorf("写入临时文件失败: %w", err)
+	}
+
+	// 返回清理函数
+	cleanup := func() {
+		os.Remove(tmpFile.Name())
+	}
+
+	return tmpFile.Name(), cleanup, nil
+}
+
 // 添加漏洞信息（带严格校验）
 func HandleCreateVulnerability(options *options.Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -390,14 +414,15 @@ func HandleCreateVulnerability(options *options.Options) gin.HandlerFunc {
 		}
 
 		// 3. 临时写入到校验用的临时文件
-		tmpDir := "data/vuln/.tmp_check"
-		os.MkdirAll(tmpDir, 0755)
-		tmpFile := filepath.Join(tmpDir, vul.Info.CVEName+".yaml")
-		os.WriteFile(tmpFile, []byte(req.FileContent), 0644)
+		tmpFile, cleanup, err := createTempFileWithContent("vuln-check-*", []byte(req.FileContent))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"status": 1, "message": err.Error()})
+			return
+		}
+		defer cleanup()
 
 		// 4. 用vulstruct.NewAdvisoryEngine加载临时文件做完整业务校验
-		_, err := vulstruct.NewAdvisoryEngine(tmpFile)
-		_ = os.RemoveAll(tmpDir) // 删除整个临时目录
+		_, err = vulstruct.ReadVersionVulSingFile(tmpFile)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "漏洞内容校验失败: " + err.Error()})
 			return
@@ -474,14 +499,15 @@ func HandleEditVulnerability(c *gin.Context) {
 	}
 
 	// 3. 临时写入到校验用的临时文件
-	tmpDir := "data/vuln/.tmp_check"
-	os.MkdirAll(tmpDir, 0755)
-	tmpFile := filepath.Join(tmpDir, vul.Info.CVEName+".yaml")
-	os.WriteFile(tmpFile, []byte(req.FileContent), 0644)
+	tmpFile, cleanup, err := createTempFileWithContent("vuln-check-*", []byte(req.FileContent))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": 1, "message": err.Error()})
+		return
+	}
+	defer cleanup()
 
 	// 4. 用vulstruct.NewAdvisoryEngine加载临时文件做完整业务校验
-	_, err := vulstruct.NewAdvisoryEngine(tmpFile)
-	_ = os.RemoveAll(tmpDir) // 删除整个临时目录
+	_, err = vulstruct.ReadVersionVulSingFile(tmpFile)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": 1, "message": "漏洞内容校验失败: " + err.Error()})
 		return
