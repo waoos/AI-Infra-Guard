@@ -53,32 +53,19 @@ func HandleListFingerprints(c *gin.Context) {
 	// 3. 读取 data/fingerprints/ 下所有分类和YAML文件
 	var allFingerprints []parser.FingerPrint
 	root := "data/fingerprints"
-	files, _ := os.ReadDir(root)
-	for _, f := range files {
-		if !f.IsDir() && strings.HasSuffix(f.Name(), ".yaml") {
-			content, _ := os.ReadFile(filepath.Join(root, f.Name()))
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // 忽略错误
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".yaml") {
+			content, _ := os.ReadFile(path)
 			fp, err := parser.InitFingerPrintFromData(content)
 			if err == nil && fp != nil {
 				allFingerprints = append(allFingerprints, *fp)
 			}
 		}
-	}
-
-	// 再读取所有子目录下的 .yaml 文件
-	for _, cat := range files {
-		if cat.IsDir() {
-			subFiles, _ := os.ReadDir(filepath.Join(root, cat.Name()))
-			for _, f := range subFiles {
-				if strings.HasSuffix(f.Name(), ".yaml") {
-					content, _ := os.ReadFile(filepath.Join(root, cat.Name(), f.Name()))
-					fp, err := parser.InitFingerPrintFromData(content)
-					if err == nil && fp != nil {
-						allFingerprints = append(allFingerprints, *fp)
-					}
-				}
-			}
-		}
-	}
+		return nil
+	})
 
 	// 4. 条件过滤
 	var filteredFingerprints []parser.FingerPrint

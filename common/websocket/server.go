@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"embed"
-	"log"
 	"mime"
 	"path/filepath"
 
@@ -23,11 +22,11 @@ func RunWebServer(options *options.Options) {
 	dbConfig := database.NewConfig("db/agents.db") // 推荐单独目录
 	db, err := database.InitDB(dbConfig)
 	if err != nil {
-		log.Fatalf("数据库初始化失败: %v", err)
+		gologger.Fatalf("数据库初始化失败: %v", err)
 	}
 	agentStore := database.NewAgentStore(db)
 	if err := agentStore.Init(); err != nil {
-		log.Fatalf("初始化agent表失败: %v", err)
+		gologger.Fatalf("初始化agent表失败: %v", err)
 	}
 
 	// API 版本分组

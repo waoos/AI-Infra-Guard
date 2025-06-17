@@ -17,6 +17,8 @@ const (
 	writeWait      = 10 * time.Second
 )
 
+var agentID string
+
 // AgentRegisterRequest 表示agent注册请求
 type AgentRegisterRequest struct {
 	Type    string `json:"type"`
@@ -47,7 +49,12 @@ func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if agentID != "" {
+				agentStore.UpdateOnlineStatus(agentID, false)
+			}
+			conn.Close()
+		}()
 
 		// 设置连接参数
 		conn.SetReadLimit(maxMessageSize)
@@ -73,6 +80,7 @@ func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
 
 			// 处理注册请求
 			if req.Type == "register" {
+				agentID = req.Content.AgentID
 				// 创建agent记录
 				capabilitiesJSON, _ := json.Marshal(req.Content.Capabilities)
 				agent := &database.Agent{
@@ -82,6 +90,7 @@ func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
 					Version:      req.Content.Version,
 					Capabilities: datatypes.JSON(capabilitiesJSON),
 					Meta:         req.Content.Meta,
+					Online:       true,
 				}
 
 				// 保存到数据库
@@ -100,6 +109,14 @@ func HandleAgentWebSocket(agentStore *database.AgentStore) gin.HandlerFunc {
 				if err := conn.WriteJSON(response); err != nil {
 					break
 				}
+			}
+
+			// 处理心跳消息
+			if req.Type == "heartbeat" {
+				agentStore.UpdateLastSeen(req.Content.AgentID)
+				agentStore.UpdateOnlineStatus(req.Content.AgentID, true)
+				// 可选：回复心跳ack
+				continue
 			}
 		}
 	}
