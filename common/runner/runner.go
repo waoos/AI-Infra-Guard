@@ -606,7 +606,6 @@ func (r *Runner) GetFpAndVulList() []FpInfos {
 			Desc:   fp.Info.Desc,
 		})
 	}
-	// gologger.Infof("最终返回的指纹和漏洞信息数量: %d", len(fps))
 	return fps
 }
 

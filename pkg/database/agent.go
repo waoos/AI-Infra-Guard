@@ -18,6 +18,7 @@ type Agent struct {
 	LastSeen     time.Time      `gorm:"column:last_seen;not null" json:"last_seen"`
 	CreatedAt    time.Time      `gorm:"column:created_at;not null" json:"created_at"`
 	UpdatedAt    time.Time      `gorm:"column:updated_at;not null" json:"updated_at"`
+	Online       bool           `gorm:"column:online;not null;default:false" json:"online"`
 }
 
 type AgentStore struct {
@@ -76,4 +77,8 @@ func (s *AgentStore) UpdateLastSeen(id string) error {
 // DeleteAgent 删除指定的agent
 func (s *AgentStore) DeleteAgent(id string) error {
 	return s.db.Delete(&Agent{}, "id = ?", id).Error
+}
+
+func (s *AgentStore) UpdateOnlineStatus(id string, online bool) error {
+	return s.db.Model(&Agent{}).Where("id = ?", id).Update("online", online).Error
 }
