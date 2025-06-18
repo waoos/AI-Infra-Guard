@@ -93,6 +93,7 @@ func NewAgentConnection(conn *websocket.Conn) *AgentConnection {
 
 // HandleAgentWebSocket 处理agent的WebSocket连接
 func (am *AgentManager) HandleAgentWebSocket() gin.HandlerFunc {
+
 	return func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
@@ -138,11 +139,18 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 		switch wsMsg.Type {
 		case WSMsgTypeRegister:
 			ac.handleRegister(am, wsMsg.Content)
-		case WSMsgTypeHeartbeat:
-			ac.handleHeartbeat(wsMsg.Content)
+		// case WSMsgTypeHeartbeat:
+		// 	ac.handleHeartbeat(wsMsg.Content)
 		case WSMsgTypeDisconnect:
+			// 只有在身份验证成功时才断开连接
 			ac.handleDisconnect(am, wsMsg.Content)
-			return
+			// 检查连接是否仍然活跃，如果不活跃则退出
+			ac.mu.Lock()
+			if !ac.isActive {
+				ac.mu.Unlock()
+				return
+			}
+			ac.mu.Unlock()
 		case WSMsgTypeTaskProgress:
 			ac.handleTaskProgress(wsMsg.Content)
 		case WSMsgTypeTaskResult:
@@ -205,26 +213,26 @@ func (ac *AgentConnection) handleRegister(am *AgentManager, content interface{})
 }
 
 // handleHeartbeat 处理心跳消息
-func (ac *AgentConnection) handleHeartbeat(content interface{}) {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
+// func (ac *AgentConnection) handleHeartbeat(content interface{}) {
+// 	ac.mu.Lock()
+// 	defer ac.mu.Unlock()
 
-	contentBytes, _ := json.Marshal(content)
-	var hb AgentRegisterContent
-	if err := json.Unmarshal(contentBytes, &hb); err != nil {
-		ac.sendError("心跳消息格式错误")
-		return
-	}
+// 	contentBytes, _ := json.Marshal(content)
+// 	var hb AgentRegisterContent
+// 	if err := json.Unmarshal(contentBytes, &hb); err != nil {
+// 		ac.sendError("心跳消息格式错误")
+// 		return
+// 	}
 
-	// 验证身份一致性
-	if ac.agentID == "" || ac.agentID != hb.AgentID {
-		ac.sendError("心跳消息身份验证失败")
-		return
-	}
+// 	// 验证身份一致性
+// 	if ac.agentID == "" || ac.agentID != hb.AgentID {
+// 		ac.sendError("心跳消息身份验证失败")
+// 		return
+// 	}
 
-	// ac.store.UpdateLastSeen(hb.AgentID)
-	// ac.store.UpdateOnlineStatus(hb.AgentID, true)
-}
+// 	// ac.store.UpdateLastSeen(hb.AgentID)
+// 	// ac.store.UpdateOnlineStatus(hb.AgentID, true)
+// }
 
 // handleDisconnect 处理主动断开连接
 func (ac *AgentConnection) handleDisconnect(am *AgentManager, content interface{}) {
