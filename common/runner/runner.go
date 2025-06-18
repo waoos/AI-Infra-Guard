@@ -583,23 +583,19 @@ func (r *Runner) writeResult(f *os.File, result HttpResult) {
 
 // GetFpAndVulList 获取指纹和漏洞列表
 func (r *Runner) GetFpAndVulList() []FpInfos {
-	// gologger.Infoln("开始获取指纹和漏洞列表")
 	fingerprints := make([]parser.FingerPrint, 0)
 	for _, fp := range r.fpEngine.GetFps() {
 		fp2 := fp
 		fingerprints = append(fingerprints, fp2)
 	}
-	// gologger.Infof("获取到指纹数量: %d", len(fingerprints))
 
 	fps := make([]FpInfos, 0)
 	for _, fp := range fingerprints {
-		// gologger.Infof("正在处理指纹: %s", fp.Info.Name)
 		ads, err := r.advEngine.GetAdvisories(fp.Info.Name, "", false)
 		if err != nil {
 			gologger.WithError(err).Errorln("获取漏洞列表失败", fp)
 			continue
 		}
-		// gologger.Infof("获取到漏洞数量: %d", len(ads))
 		fps = append(fps, FpInfos{
 			FpName: fp.Info.Name,
 			Vuls:   ads,
