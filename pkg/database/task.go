@@ -42,7 +42,7 @@ type Session struct {
 type TaskMessage struct {
 	ID        string         `gorm:"primaryKey;column:id" json:"id"`               // 消息ID（前端生成的对话ID）
 	SessionID string         `gorm:"column:session_id;not null" json:"session_id"` // 会话ID（也是任务ID）
-	Type      string         `gorm:"column:type;not null" json:"type"`             // liveStatus, planUpdate, statusUpdate, toolUsed等
+	Type      string         `gorm:"column:type;not null" json:"type"`             // liveStatus, planUpdate, statusUpdate, toolUsed, log等
 	EventData datatypes.JSON `gorm:"column:event_data;not null" json:"event_data"` // 存储事件的具体数据
 	Timestamp int64          `gorm:"column:timestamp;not null" json:"timestamp"`
 	CreatedAt time.Time      `gorm:"column:created_at;not null" json:"created_at"`
