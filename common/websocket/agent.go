@@ -13,16 +13,31 @@ import (
 
 const (
 	// WebSocket相关常量
-	maxMessageSize        = 512 * 1024 // 512KB
-	pongWait              = 60 * time.Second
-	pingPeriod            = (pongWait * 9) / 10
-	writeWait             = 10 * time.Second
-	WSMsgTypeRegister     = "register"
-	WSMsgTypeHeartbeat    = "heartbeat"
-	WSMsgTypeTaskProgress = "task_progress"
-	WSMsgTypeTaskResult   = "task_result"
-	WSMsgTypeDisconnect   = "disconnect" // 新增：主动断开连接的消息类型
+	maxMessageSize    = 512 * 1024 // 512KB
+	pongWait          = 60 * time.Second
+	pingPeriod        = (pongWait * 9) / 10
+	writeWait         = 10 * time.Second
+	WSMsgTypeRegister = "register"
+	// WSMsgTypeTaskAssign = "task_assign" // 任务分配
+	WSMsgTypeDisconnect = "disconnect" // 主动断开连接的消息类型
+
+	// Agent 端事件类型（与前端 SSE 事件类型一致）
+	WSMsgTypeLiveStatus   = "liveStatus"   // 存活状态
+	WSMsgTypePlanUpdate   = "planUpdate"   // 计划更新
+	WSMsgTypeNewPlanStep  = "newPlanStep"  // 新计划步骤
+	WSMsgTypeStatusUpdate = "statusUpdate" // 状态更新
+	WSMsgTypeToolUsed     = "toolUsed"     // 工具使用
 )
+
+// Agent 端事件消息（Agent -> Server，直接使用 task.go 中的结构体）
+// 注意：Agent 端返回的事件体直接使用 task.go 中定义的结构体：
+// - LiveStatusEvent
+// - PlanUpdateEvent
+// - PlanTaskItem
+// - NewPlanStepEvent
+// - StatusUpdateEvent
+// - ToolUsedEvent
+// 这样可以确保格式完全一致，避免重复定义
 
 // AgentConnection 管理单个agent的连接
 type AgentConnection struct {
@@ -37,6 +52,7 @@ type AgentConnection struct {
 type AgentManager struct {
 	connections map[string]*AgentConnection
 	mu          sync.RWMutex
+	taskManager *TaskManager // 新增：引用 TaskManager
 	// store       *database.AgentStore // 注释掉数据库字段
 }
 
@@ -48,22 +64,6 @@ type AgentRegisterContent struct {
 	Version      string   `json:"version,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
 	Meta         string   `json:"meta,omitempty"`
-}
-
-// 任务进度消息内容
-type TaskProgressContent struct {
-	AgentID  string `json:"agent_id"`
-	TaskID   string `json:"task_id"`
-	Progress int    `json:"progress"`
-	Log      string `json:"log"`
-}
-
-// 任务结果消息内容
-type TaskResultContent struct {
-	AgentID string      `json:"agent_id"`
-	TaskID  string      `json:"task_id"`
-	Status  string      `json:"status"`
-	Result  interface{} `json:"result"`
 }
 
 // 断开连接消息内容
@@ -139,8 +139,16 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 		switch wsMsg.Type {
 		case WSMsgTypeRegister:
 			ac.handleRegister(am, wsMsg.Content)
-		// case WSMsgTypeHeartbeat:
-		// 	ac.handleHeartbeat(wsMsg.Content)
+		case WSMsgTypeLiveStatus:
+			ac.handleLiveStatus(am, wsMsg.Content)
+		case WSMsgTypePlanUpdate:
+			ac.handlePlanUpdate(am, wsMsg.Content)
+		case WSMsgTypeNewPlanStep:
+			ac.handleNewPlanStep(am, wsMsg.Content)
+		case WSMsgTypeStatusUpdate:
+			ac.handleStatusUpdate(am, wsMsg.Content)
+		case WSMsgTypeToolUsed:
+			ac.handleToolUsed(am, wsMsg.Content)
 		case WSMsgTypeDisconnect:
 			// 只有在身份验证成功时才断开连接
 			ac.handleDisconnect(am, wsMsg.Content)
@@ -151,10 +159,6 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 				return
 			}
 			ac.mu.Unlock()
-		case WSMsgTypeTaskProgress:
-			ac.handleTaskProgress(wsMsg.Content)
-		case WSMsgTypeTaskResult:
-			ac.handleTaskResult(wsMsg.Content)
 		}
 	}
 }
@@ -315,22 +319,6 @@ func (ac *AgentConnection) cleanup(am *AgentManager) {
 	ac.conn.Close()
 }
 
-// handleTaskProgress 处理任务进度消息
-func (ac *AgentConnection) handleTaskProgress(content interface{}) {
-	contentBytes, _ := json.Marshal(content)
-	var prog TaskProgressContent
-	json.Unmarshal(contentBytes, &prog)
-	// ...进度逻辑...
-}
-
-// handleTaskResult 处理任务结果消息
-func (ac *AgentConnection) handleTaskResult(content interface{}) {
-	contentBytes, _ := json.Marshal(content)
-	var res TaskResultContent
-	json.Unmarshal(contentBytes, &res)
-	// ...结果逻辑...
-}
-
 // sendError 发送错误响应
 func (ac *AgentConnection) sendError(message string) {
 	response := WSMessage{
@@ -341,4 +329,127 @@ func (ac *AgentConnection) sendError(message string) {
 		},
 	}
 	ac.conn.WriteJSON(response)
+}
+
+// handleLiveStatus 处理存活状态事件
+func (ac *AgentConnection) handleLiveStatus(am *AgentManager, content interface{}) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	contentBytes, _ := json.Marshal(content)
+	var event LiveStatusEvent
+	if err := json.Unmarshal(contentBytes, &event); err != nil {
+		ac.sendError("存活状态事件格式错误")
+		return
+	}
+
+	// 转发给 TaskManager 处理
+	am.mu.RLock()
+	if am.taskManager != nil {
+		am.taskManager.HandleAgentEvent(WSMsgTypeLiveStatus, event)
+	}
+	am.mu.RUnlock()
+}
+
+// handlePlanUpdate 处理计划更新事件
+func (ac *AgentConnection) handlePlanUpdate(am *AgentManager, content interface{}) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	contentBytes, _ := json.Marshal(content)
+	var event PlanUpdateEvent
+	if err := json.Unmarshal(contentBytes, &event); err != nil {
+		ac.sendError("计划更新事件格式错误")
+		return
+	}
+
+	// 转发给 TaskManager 处理
+	am.mu.RLock()
+	if am.taskManager != nil {
+		am.taskManager.HandleAgentEvent(WSMsgTypePlanUpdate, event)
+	}
+	am.mu.RUnlock()
+}
+
+// handleNewPlanStep 处理新计划步骤事件
+func (ac *AgentConnection) handleNewPlanStep(am *AgentManager, content interface{}) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	contentBytes, _ := json.Marshal(content)
+	var event NewPlanStepEvent
+	if err := json.Unmarshal(contentBytes, &event); err != nil {
+		ac.sendError("新计划步骤事件格式错误")
+		return
+	}
+
+	// 转发给 TaskManager 处理
+	am.mu.RLock()
+	if am.taskManager != nil {
+		am.taskManager.HandleAgentEvent(WSMsgTypeNewPlanStep, event)
+	}
+	am.mu.RUnlock()
+}
+
+// handleStatusUpdate 处理状态更新事件
+func (ac *AgentConnection) handleStatusUpdate(am *AgentManager, content interface{}) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	contentBytes, _ := json.Marshal(content)
+	var event StatusUpdateEvent
+	if err := json.Unmarshal(contentBytes, &event); err != nil {
+		ac.sendError("状态更新事件格式错误")
+		return
+	}
+
+	// 转发给 TaskManager 处理
+	am.mu.RLock()
+	if am.taskManager != nil {
+		am.taskManager.HandleAgentEvent(WSMsgTypeStatusUpdate, event)
+	}
+	am.mu.RUnlock()
+}
+
+// handleToolUsed 处理工具使用事件
+func (ac *AgentConnection) handleToolUsed(am *AgentManager, content interface{}) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	contentBytes, _ := json.Marshal(content)
+	var event ToolUsedEvent
+	if err := json.Unmarshal(contentBytes, &event); err != nil {
+		ac.sendError("工具使用事件格式错误")
+		return
+	}
+
+	// 转发给 TaskManager 处理
+	am.mu.RLock()
+	if am.taskManager != nil {
+		am.taskManager.HandleAgentEvent(WSMsgTypeToolUsed, event)
+	}
+	am.mu.RUnlock()
+}
+
+// 添加获取可用 Agent 的方法
+func (am *AgentManager) GetAvailableAgents() []*AgentConnection {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	var availableAgents []*AgentConnection
+	for _, conn := range am.connections {
+		conn.mu.Lock()
+		if conn.isActive {
+			availableAgents = append(availableAgents, conn)
+		}
+		conn.mu.Unlock()
+	}
+	return availableAgents
+}
+
+// SetTaskManager 设置 TaskManager 引用
+func (am *AgentManager) SetTaskManager(taskManager *TaskManager) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.taskManager = taskManager
 }

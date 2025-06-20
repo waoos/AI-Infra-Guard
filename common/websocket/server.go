@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/internal/options"
+	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
 )
 
@@ -18,18 +19,22 @@ func RunWebServer(options *options.Options) {
 	wsServer := NewWSServer(options)
 
 	// 1. 初始化数据库和AgentStore
-	// dbConfig := database.NewConfig("db/agents.db") // 推荐单独目录
-	// db, err := database.InitDB(dbConfig)
-	// if err != nil {
-	// 	gologger.Fatalf("数据库初始化失败: %v", err)
-	// }
-	// agentStore := database.NewAgentStore(db)
-	// if err := agentStore.Init(); err != nil {
-	// 	gologger.Fatalf("初始化agent表失败: %v", err)
-	// }
+	dbConfig := database.NewConfig("db/tasks.db") // 推荐单独目录
+	db, err := database.InitDB(dbConfig)
+	if err != nil {
+		gologger.Fatalf("数据库初始化失败: %v", err)
+	}
+	taskStore := database.NewTaskStore(db)
+	if err := taskStore.Init(); err != nil {
+		gologger.Fatalf("初始化agent表失败: %v", err)
+	}
 
 	// 初始化AgentManager
 	agentManager := NewAgentManager()
+	taskManager := NewTaskManager(agentManager, taskStore)
+
+	// 将 TaskManager 注入到 AgentManager
+	agentManager.SetTaskManager(taskManager)
 
 	// API 版本分组
 	v1 := r.Group("/api/v1")
@@ -77,16 +82,31 @@ func RunWebServer(options *options.Options) {
 		appSecurity := v1.Group("/app-security")
 		{
 			// 任务管理
-			appSecurity.Group("/tasks")
-
-			// MCP 相关 (原有接口迁移)
-			mcp := appSecurity.Group("/mcp")
+			tasks := appSecurity.Group("/tasks")
 			{
-				mcp.GET("/plugins", func(c *gin.Context) {
-					mcpPlugins(c.Writer, c.Request)
+				// SSE接口
+				tasks.GET("/sse", func(c *gin.Context) {
+					HandleTaskSSE(c, taskManager)
 				})
-				mcp.GET("/ws", func(c *gin.Context) {
-					wsServer.HandleMcpWS(c.Writer, c.Request)
+				// 新建任务接口
+				tasks.POST("", func(c *gin.Context) {
+					HandleTaskCreate(c, taskManager)
+				})
+				// 文件上传接口
+				tasks.POST("/uploadFile", func(c *gin.Context) {
+					HandleUploadFile(c, taskManager)
+				})
+				// 更新任务信息接口
+				tasks.PUT("/:sessionId", func(c *gin.Context) {
+					HandleUpdateTask(c, taskManager)
+				})
+				// 删除任务接口
+				tasks.DELETE("/:sessionId", func(c *gin.Context) {
+					HandleDeleteTask(c, taskManager)
+				})
+				// 终止任务接口
+				tasks.POST("/:sessionId/terminate", func(c *gin.Context) {
+					HandleTerminateTask(c, taskManager)
 				})
 			}
 		}
