@@ -4,14 +4,15 @@ package websocket
 // 对应前端创建任务时的输入
 // 例如：{"id":..., "sessionId":..., "task":..., ...}
 type TaskCreateRequest struct {
-	ID             string                 `json:"id"`
-	SessionID      string                 `json:"sessionId"`
-	Task           string                 `json:"task"`
-	Timestamp      int64                  `json:"timestamp"`
-	Content        string                 `json:"content"`
-	Params         map[string]interface{} `json:"params"`
-	Attachments    []string               `json:"attachments"`
-	CountryIsoCode string                 `json:"countryIsoCode"`
+	ID             string                 `json:"id"`             // 消息ID（前端生成的对话ID）
+	SessionID      string                 `json:"sessionId"`      // 会话ID（任务ID）
+	UserID         string                 `json:"userId"`         // 用户ID（可选，不传默认为公共用户）
+	Task           string                 `json:"task"`           // 任务类型
+	Timestamp      int64                  `json:"timestamp"`      // 时间戳
+	Content        string                 `json:"content"`        // 任务内容描述
+	Params         map[string]interface{} `json:"params"`         // 任务参数
+	Attachments    []string               `json:"attachments"`    // 附件列表
+	CountryIsoCode string                 `json:"countryIsoCode"` // 国家代码（可选）
 }
 
 // 通用事件消息体（SSE推送）

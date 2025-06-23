@@ -9,6 +9,8 @@ import (
 	"github.com/Tencent/AI-Infra-Guard/internal/options"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
+	// IOA插件导入（需要配置内部模块依赖）
+	// _ "git.code.oa.com/trpc-go/trpc-filter/ioa"
 )
 
 //go:embed static/*
@@ -81,6 +83,9 @@ func RunWebServer(options *options.Options) {
 		// 3. AI应用安全中心
 		appSecurity := v1.Group("/app-security")
 		{
+			// 应用IOA中间件
+			appSecurity.Use(setupIOAMiddleware())
+
 			// 任务管理
 			tasks := appSecurity.Group("/tasks")
 			{
@@ -161,5 +166,23 @@ func RunWebServer(options *options.Options) {
 	gologger.Infof("Starting WebServer on http://%s\n", options.WebServerAddr)
 	if err := r.Run(options.WebServerAddr); err != nil {
 		gologger.Fatalf("Could not start WebSocket server: %s\n", err)
+	}
+}
+
+// 配置IOA中间件
+func setupIOAMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 只需要读取staffid作为userId
+		staffID := c.GetHeader("staffid")
+
+		// 存储到gin上下文
+		c.Set("user_id", staffID)
+
+		// // 如果没有员工信息，使用默认用户
+		// if staffID == "" {
+		// 	c.Set("user_id", "public_user")
+		// }
+
+		c.Next()
 	}
 }

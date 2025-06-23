@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
+	"gorm.io/datatypes"
 )
 
 // 任务管理器相关数据结构
@@ -118,6 +120,24 @@ func (tm *TaskManager) HandleAgentEvent(eventType string, event interface{}) {
 	}
 }
 
+// generateSecureFileName 生成安全的唯一文件名
+func generateSecureFileName(originalName string) string {
+	// 获取文件扩展名
+	ext := filepath.Ext(originalName)
+
+	// 生成UUID作为文件名前缀
+	uuid := generateUUID()
+
+	// 组合：UUID + 时间戳 + 扩展名
+	timestamp := time.Now().Format("20060102150405")
+	return fmt.Sprintf("%s_%s%s", uuid, timestamp, ext)
+}
+
+// generateUUID 生成简单的UUID（实际项目中建议使用标准UUID库）
+func generateUUID() string {
+	return fmt.Sprintf("%d_%d", time.Now().UnixNano(), time.Now().Unix())
+}
+
 // 处理各种事件的具体方法
 func (tm *TaskManager) handleLiveStatusEvent(event LiveStatusEvent) {
 	// 这里可以添加事件存储逻辑
@@ -147,23 +167,30 @@ func (tm *TaskManager) handleToolUsedEvent(event ToolUsedEvent) {
 }
 
 // TerminateTask 终止任务
-func (tm *TaskManager) TerminateTask(sessionId string) error {
-	// 1. 检查任务是否存在
+func (tm *TaskManager) TerminateTask(sessionId string, userID string) error {
+	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
 		return fmt.Errorf("任务不存在")
 	}
-	// 2. 通知 Agent 终止任务
+
+	// 验证用户权限（只有任务创建者才能终止任务）
+	if session.UserID != userID {
+		return fmt.Errorf("无权限操作此任务")
+	}
+
+	// 通知 Agent 终止任务
 	if session.AssignedAgent != "" {
 		tm.notifyAgentToTerminate(session.AssignedAgent, sessionId)
 	}
-	// 3. 更新任务状态
+
+	// 更新任务状态
 	err = tm.taskStore.UpdateSessionStatus(sessionId, "terminated")
 	if err != nil {
 		return fmt.Errorf("更新任务状态失败")
 	}
 
-	// 4. 发送终止事件给前端
+	// 发送终止事件给前端
 	tm.sendTerminationEvent(sessionId)
 
 	return nil
@@ -214,14 +241,19 @@ func generateEventID() string {
 }
 
 // UpdateTask 更新任务信息
-func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest) error {
-	// 1. 检查任务是否存在
-	_, err := tm.taskStore.GetSession(sessionId)
+func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest, userID string) error {
+	// 检查任务是否存在
+	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
 		return fmt.Errorf("任务不存在")
 	}
 
-	// 2. 更新任务信息
+	// 验证用户权限（只有任务创建者才能更新任务）
+	if session.UserID != userID {
+		return fmt.Errorf("无权限操作此任务")
+	}
+
+	// 更新任务信息
 	updates := map[string]interface{}{
 		"updated_at": time.Now(),
 	}
@@ -230,7 +262,7 @@ func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest) erro
 		updates["title"] = req.Title
 	}
 
-	// 3. 执行数据库更新
+	// 执行数据库更新
 	// err = tm.taskStore.UpdateSession(sessionId, updates)
 	if err != nil {
 		return fmt.Errorf("更新任务信息失败")
@@ -240,33 +272,33 @@ func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest) erro
 }
 
 // DeleteTask 删除任务
-func (tm *TaskManager) DeleteTask(sessionId string) error {
-	// 1. 检查任务是否存在
+func (tm *TaskManager) DeleteTask(sessionId string, userID string) error {
+	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
 		return fmt.Errorf("任务不存在")
 	}
 
-	// 2. 检查任务状态是否允许删除
-	if session.Status == "running" {
-		return fmt.Errorf("任务正在执行中，无法删除")
+	// 验证用户权限（只有任务创建者才能删除任务）
+	if session.UserID != userID {
+		return fmt.Errorf("无权限操作此任务")
 	}
 
-	// 3. 删除相关的消息记录
+	// 删除相关的消息记录
 	// 数据库操作：删除该会话下的所有 TaskMessage 记录
 	// err = tm.taskStore.DeleteSessionMessages(sessionId)
 	// if err != nil {
 	//     return fmt.Errorf("删除任务消息失败: %v", err)
 	// }
 
-	// 4. 删除会话记录
+	// 删除会话记录
 	// 数据库操作：删除 Session 记录
 	// err = tm.taskStore.DeleteSession(sessionId)
 	// if err != nil {
 	//     return fmt.Errorf("删除任务失败: %v", err)
 	// }
 
-	// 5. 清理内存中的任务数据
+	// 清理内存中的任务数据
 	tm.mu.Lock()
 	delete(tm.tasks, sessionId)
 	tm.mu.Unlock()
@@ -276,20 +308,19 @@ func (tm *TaskManager) DeleteTask(sessionId string) error {
 
 // UploadFile 上传文件
 func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (string, error) {
-	// 1. 生成唯一的文件名
-	ext := filepath.Ext(file.Filename)
-	fileName := generateFileName() + ext
+	// 生成安全的唯一文件名
+	fileName := generateSecureFileName(file.Filename)
 
-	// 2. 创建上传目录
+	// 创建上传目录
 	uploadDir := "./uploads"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return "", fmt.Errorf("创建上传目录失败: %v", err)
 	}
 
-	// 3. 创建文件路径
+	// 创建文件路径
 	filePath := filepath.Join(uploadDir, fileName)
 
-	// 4. 保存文件到本地
+	// 保存文件到本地
 	src, err := file.Open()
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %v", err)
@@ -302,17 +333,67 @@ func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (string, error) {
 	}
 	defer dst.Close()
 
-	if _, err = io.Copy(dst, src); err != nil {
+	// 复制文件内容并验证
+	written, err := io.Copy(dst, src)
+	if err != nil {
+		// 清理已创建的文件
+		os.Remove(filePath)
 		return "", fmt.Errorf("保存文件失败: %v", err)
 	}
 
-	// 6. 返回文件URL
+	// 验证写入的文件大小
+	if written != file.Size {
+		os.Remove(filePath)
+		return "", fmt.Errorf("文件写入不完整")
+	}
+
+	// 返回文件URL
 	fileUrl := fmt.Sprintf("/uploads/%s", fileName)
 
 	return fileUrl, nil
 }
 
-// generateFileName 生成唯一文件名
-func generateFileName() string {
-	return time.Now().Format("20060102150405") + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
+// GetUserTasks 获取任务列表
+func (tm *TaskManager) GetUserTasks(userID string) ([]map[string]interface{}, error) {
+	// 从数据库获取用户的所有会话
+	sessions, err := tm.taskStore.GetUserSessions(userID)
+	if err != nil {
+		return nil, fmt.Errorf("获取用户任务失败: %v", err)
+	}
+
+	// 转换为前端需要的格式
+	var tasks []map[string]interface{}
+	for _, session := range sessions {
+		task := map[string]interface{}{
+			"id":        session.ID,
+			"title":     session.Title,
+			"content":   session.Content,
+			"status":    session.Status,
+			"createdAt": session.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			"updatedAt": session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, nil
+}
+
+// 辅助函数：生成任务标题
+func generateTitle(content string) string {
+	if len(content) > 50 {
+		return content[:50]
+	}
+	return content
+}
+
+// 辅助函数：将interface{}转换为datatypes.JSON
+func mustMarshalJSON(v interface{}) datatypes.JSON {
+	if v == nil {
+		return datatypes.JSON("{}")
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return datatypes.JSON("{}")
+	}
+	return datatypes.JSON(data)
 }
