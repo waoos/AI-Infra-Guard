@@ -27,6 +27,7 @@ type Session struct {
 	Attachments   datatypes.JSON `gorm:"column:attachments" json:"attachments"`                  // 附件
 	Status        string         `gorm:"column:status;not null;default:'pending'" json:"status"` // pending, running, completed, failed
 	AssignedAgent string         `gorm:"column:assigned_agent" json:"assigned_agent"`            // 分配的Agent
+	ContryIsoCode string         `gorm:"column:contry_iso_code" json:"contry_iso_code"`          // 标识语言
 	StartedAt     *int64         `gorm:"column:started_at" json:"started_at"`                    // 时间戳毫秒级
 	CompletedAt   *int64         `gorm:"column:completed_at" json:"completed_at"`                // 时间戳毫秒级
 	CreatedAt     int64          `gorm:"column:created_at;not null" json:"created_at"`           // 时间戳毫秒级

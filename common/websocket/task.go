@@ -4,15 +4,15 @@ package websocket
 // 对应前端创建任务时的输入
 // 例如：{"id":..., "sessionId":..., "task":..., ...}
 type TaskCreateRequest struct {
-	ID             string                 `json:"id" validate:"required"`        // 消息ID（前端生成的对话ID）- 必需
-	SessionID      string                 `json:"sessionId" validate:"required"` // 会话ID（任务ID）- 必需
-	Username       string                 `json:"username,omitempty"`            // 用户名（可选，不传默认为公共用户）
-	Task           string                 `json:"task" validate:"required"`      // 任务类型 - 必需
-	Timestamp      int64                  `json:"timestamp" validate:"required"` // 时间戳 - 必需
-	Content        string                 `json:"content" validate:"required"`   // 任务内容描述 - 必需
-	Params         map[string]interface{} `json:"params,omitempty"`              // 任务参数 - 可选
-	Attachments    []string               `json:"attachments,omitempty"`         // 附件列表 - 可选
-	CountryIsoCode string                 `json:"countryIsoCode,omitempty"`      // 国家代码（可选）
+	ID            string                 `json:"id" validate:"required"`        // 消息ID（前端生成的对话ID）- 必需
+	SessionID     string                 `json:"sessionId" validate:"required"` // 会话ID（任务ID）- 必需
+	Username      string                 `json:"username,omitempty"`            // 用户名（可选，不传默认为公共用户）
+	Task          string                 `json:"task" validate:"required"`      // 任务类型 - 必需
+	Timestamp     int64                  `json:"timestamp" validate:"required"` // 时间戳 - 必需
+	Content       string                 `json:"content" validate:"required"`   // 任务内容描述 - 必需
+	Params        map[string]interface{} `json:"params,omitempty"`              // 任务参数 - 可选
+	Attachments   []string               `json:"attachments,omitempty"`         // 附件列表 - 可选
+	ContryIsoCode string                 `json:"contryIsoCode,omitempty"`       // 标识语言（可选）
 }
 
 // 通用事件消息体（SSE推送）

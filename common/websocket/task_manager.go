@@ -68,6 +68,7 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 		Attachments:   mustMarshalJSON(req.Attachments),
 		Status:        "doing",
 		AssignedAgent: "",
+		ContryIsoCode: req.ContryIsoCode,
 	}
 
 	err := tm.taskStore.CreateSession(session)
@@ -531,11 +532,12 @@ func (tm *TaskManager) GetUserTasks(username string) ([]map[string]interface{}, 
 	var tasks []map[string]interface{}
 	for _, session := range sessions {
 		task := map[string]interface{}{
-			"sessionId": session.ID,
-			"title":     session.Title,
-			"taskType":  session.TaskType,
-			"status":    session.Status,
-			"updatedAt": session.UpdatedAt, // 直接使用时间戳毫秒级
+			"sessionId":     session.ID,
+			"title":         session.Title,
+			"taskType":      session.TaskType,
+			"status":        session.Status,
+			"contryIsoCode": session.ContryIsoCode,
+			"updatedAt":     session.UpdatedAt, // 直接使用时间戳毫秒级
 		}
 		tasks = append(tasks, task)
 	}
@@ -643,12 +645,13 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string) (map[str
 
 	// 构建返回数据
 	detail := map[string]interface{}{
-		"sessionId": session.ID,
-		"name":      session.Title,
-		"status":    session.Status,
-		"createdAt": session.CreatedAt,
-		"files":     files,
-		"messages":  messageList,
+		"sessionId":     session.ID,
+		"name":          session.Title,
+		"status":        session.Status,
+		"contryIsoCode": session.ContryIsoCode,
+		"createdAt":     session.CreatedAt,
+		"files":         files,
+		"messages":      messageList,
 	}
 
 	return detail, nil
