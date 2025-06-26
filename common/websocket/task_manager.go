@@ -108,14 +108,31 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 	// 3. 选择 Agent（简单策略）
 	selectedAgent := availableAgents[0]
 
-	// 4. 更新session的assigned_agent和开始时间
+	// 4. 检查连接健康状态
+	if !selectedAgent.IsConnectionHealthy() {
+		// 如果连接不健康，尝试其他 Agent
+		for _, agent := range availableAgents[1:] {
+			if agent.IsConnectionHealthy() {
+				selectedAgent = agent
+				break
+			}
+		}
+
+		// 如果所有 Agent 都不健康，记录错误并返回
+		if !selectedAgent.IsConnectionHealthy() {
+			gologger.Errorf("所有agent连接都异常 for sessionId: %s", sessionId)
+			return
+		}
+	}
+
+	// 5. 更新session的assigned_agent和开始时间
 	err := tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, selectedAgent.agentID)
 	if err != nil {
-		gologger.Errorf("Failed to update session assigned agent: %v", err)
+		gologger.Errorf("无法更新session的assigned_agent: %v", err)
 		return
 	}
 
-	// 5. 构造任务分配消息
+	// 6. 构造任务分配消息
 	taskMsg := WSMessage{
 		Type: WSMsgTypeTaskAssign,
 		Content: TaskContent{
@@ -128,16 +145,16 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 		},
 	}
 
-	// 6. 发送给 Agent
-	err = selectedAgent.conn.WriteJSON(taskMsg)
+	// 7. 使用重试机制发送给 Agent
+	err = selectedAgent.SendMessageWithRetry(taskMsg, 3) // 最多重试3次
 	if err != nil {
-		gologger.Errorf("Failed to send task to agent %s: %v", selectedAgent.agentID, err)
-		// 如果发送失败，可以重置assigned_agent
+		gologger.Errorf("下发任务给 %s 失败: %v", selectedAgent.agentID, err)
+		// 如果发送失败，重置assigned_agent
 		tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, "")
 		return
 	}
 
-	gologger.Infof("Task %s assigned to agent %s", task.SessionID, selectedAgent.agentID)
+	gologger.Infof("任务下发成功: sessionId=%s, agentId=%s", task.SessionID, selectedAgent.agentID)
 }
 
 // HandleAgentEvent 处理来自Agent的事件
@@ -306,7 +323,13 @@ func (tm *TaskManager) notifyAgentToTerminate(agentID string, sessionId string) 
 					"reason":     "用户主动终止",
 				},
 			}
-			agent.conn.WriteJSON(terminateMsg)
+			// 使用SendMessageWithRetry方法，避免直接访问conn
+			err := agent.SendMessageWithRetry(terminateMsg, 3)
+			if err != nil {
+				gologger.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
+			} else {
+				gologger.Infof("终止消息已发送给Agent %s: sessionId=%s", agentID, sessionId)
+			}
 			break
 		}
 	}
