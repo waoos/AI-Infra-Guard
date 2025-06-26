@@ -177,6 +177,14 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 		if resultUpdateEvent, ok := event.(ResultUpdateEvent); ok {
 			gologger.Debugf("resultUpdate事件详情: sessionId=%s, fileName=%s",
 				sessionId, resultUpdateEvent.Result.FileName)
+
+			// 更新任务状态为已完成
+			err := tm.taskStore.UpdateSessionStatus(sessionId, "completed")
+			if err != nil {
+				gologger.Errorf("更新任务状态为已完成失败: %v", err)
+			} else {
+				gologger.Infof("任务状态已更新为已完成: sessionId=%s", sessionId)
+			}
 			// 任务完成，可以清理资源
 			go tm.cleanupTask(sessionId)
 		}
@@ -277,6 +285,9 @@ func (tm *TaskManager) TerminateTask(sessionId string, username string) error {
 
 	// 发送终止事件给前端
 	tm.sendTerminationEvent(sessionId)
+
+	// 任务终止，清理资源
+	go tm.cleanupTask(sessionId)
 
 	return nil
 }
@@ -541,7 +552,7 @@ func (tm *TaskManager) CloseSSESession(sessionId string) {
 	tm.sseManager.RemoveConnection(sessionId)
 }
 
-// 任务完成时的清理
+// 任务完成/中断时的清理
 func (tm *TaskManager) cleanupTask(sessionId string) {
 	// 清理内存中的任务数据
 	tm.mu.Lock()
