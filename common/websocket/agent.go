@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -139,16 +140,6 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 		switch wsMsg.Type {
 		case WSMsgTypeRegister:
 			ac.handleRegister(am, wsMsg.Content)
-		case WSMsgTypeLiveStatus:
-			ac.handleLiveStatus(am, wsMsg.Content)
-		case WSMsgTypePlanUpdate:
-			ac.handlePlanUpdate(am, wsMsg.Content)
-		case WSMsgTypeNewPlanStep:
-			ac.handleNewPlanStep(am, wsMsg.Content)
-		case WSMsgTypeStatusUpdate:
-			ac.handleStatusUpdate(am, wsMsg.Content)
-		case WSMsgTypeToolUsed:
-			ac.handleToolUsed(am, wsMsg.Content)
 		case WSMsgTypeDisconnect:
 			// 只有在身份验证成功时才断开连接
 			ac.handleDisconnect(am, wsMsg.Content)
@@ -159,6 +150,11 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 				return
 			}
 			ac.mu.Unlock()
+		case WSMsgTypeLiveStatus, WSMsgTypePlanUpdate, WSMsgTypeNewPlanStep, WSMsgTypeStatusUpdate, WSMsgTypeToolUsed:
+			// 所有事件类型都统一处理
+			ac.handleAgentEvent(am, wsMsg.Content, wsMsg.Type)
+		default:
+			ac.sendError(fmt.Sprintf("未知的消息类型: %s", wsMsg.Type))
 		}
 	}
 }
@@ -331,102 +327,26 @@ func (ac *AgentConnection) sendError(message string) {
 	ac.conn.WriteJSON(response)
 }
 
-// handleLiveStatus 处理存活状态事件
-func (ac *AgentConnection) handleLiveStatus(am *AgentManager, content interface{}) {
+// 通用事件处理函数
+func (ac *AgentConnection) handleAgentEvent(am *AgentManager, content interface{}, eventType string) {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 
 	contentBytes, _ := json.Marshal(content)
-	var event LiveStatusEvent
-	if err := json.Unmarshal(contentBytes, &event); err != nil {
-		ac.sendError("存活状态事件格式错误")
+	var eventMessage TaskEventMessage
+	if err := json.Unmarshal(contentBytes, &eventMessage); err != nil {
+		ac.sendError(fmt.Sprintf("%s事件格式错误", eventType))
 		return
 	}
+
+	// 从TaskEventMessage中提取sessionId和事件数据
+	sessionId := eventMessage.SessionID
+	event := eventMessage.Event
 
 	// 转发给 TaskManager 处理
 	am.mu.RLock()
 	if am.taskManager != nil {
-		am.taskManager.HandleAgentEvent(WSMsgTypeLiveStatus, event)
-	}
-	am.mu.RUnlock()
-}
-
-// handlePlanUpdate 处理计划更新事件
-func (ac *AgentConnection) handlePlanUpdate(am *AgentManager, content interface{}) {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-
-	contentBytes, _ := json.Marshal(content)
-	var event PlanUpdateEvent
-	if err := json.Unmarshal(contentBytes, &event); err != nil {
-		ac.sendError("计划更新事件格式错误")
-		return
-	}
-
-	// 转发给 TaskManager 处理
-	am.mu.RLock()
-	if am.taskManager != nil {
-		am.taskManager.HandleAgentEvent(WSMsgTypePlanUpdate, event)
-	}
-	am.mu.RUnlock()
-}
-
-// handleNewPlanStep 处理新计划步骤事件
-func (ac *AgentConnection) handleNewPlanStep(am *AgentManager, content interface{}) {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-
-	contentBytes, _ := json.Marshal(content)
-	var event NewPlanStepEvent
-	if err := json.Unmarshal(contentBytes, &event); err != nil {
-		ac.sendError("新计划步骤事件格式错误")
-		return
-	}
-
-	// 转发给 TaskManager 处理
-	am.mu.RLock()
-	if am.taskManager != nil {
-		am.taskManager.HandleAgentEvent(WSMsgTypeNewPlanStep, event)
-	}
-	am.mu.RUnlock()
-}
-
-// handleStatusUpdate 处理状态更新事件
-func (ac *AgentConnection) handleStatusUpdate(am *AgentManager, content interface{}) {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-
-	contentBytes, _ := json.Marshal(content)
-	var event StatusUpdateEvent
-	if err := json.Unmarshal(contentBytes, &event); err != nil {
-		ac.sendError("状态更新事件格式错误")
-		return
-	}
-
-	// 转发给 TaskManager 处理
-	am.mu.RLock()
-	if am.taskManager != nil {
-		am.taskManager.HandleAgentEvent(WSMsgTypeStatusUpdate, event)
-	}
-	am.mu.RUnlock()
-}
-
-// handleToolUsed 处理工具使用事件
-func (ac *AgentConnection) handleToolUsed(am *AgentManager, content interface{}) {
-	ac.mu.Lock()
-	defer ac.mu.Unlock()
-
-	contentBytes, _ := json.Marshal(content)
-	var event ToolUsedEvent
-	if err := json.Unmarshal(contentBytes, &event); err != nil {
-		ac.sendError("工具使用事件格式错误")
-		return
-	}
-
-	// 转发给 TaskManager 处理
-	am.mu.RLock()
-	if am.taskManager != nil {
-		am.taskManager.HandleAgentEvent(WSMsgTypeToolUsed, event)
+		am.taskManager.HandleAgentEvent(sessionId, eventType, event)
 	}
 	am.mu.RUnlock()
 }

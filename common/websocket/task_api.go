@@ -1,14 +1,12 @@
 package websocket
 
 import (
-	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -87,42 +85,66 @@ func validateTaskUpdateRequest(req *TaskUpdateRequest) error {
 
 // 预留任务相关接口实现
 
-// SSE接口（心跳推送）
+// SSE接口（实时事件推送）
 func HandleTaskSSE(c *gin.Context, tm *TaskManager) {
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Flush()
-
-	sessionId := c.Query("sessionId")
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.Request.Context().Done():
-			return
-		case t := <-ticker.C:
-			msg := TaskEventMessage{
-				ID:        fmt.Sprintf("%d", t.UnixNano()),
-				Type:      "event",
-				SessionID: sessionId,
-				Timestamp: t.UnixMilli(),
-				Event: LiveStatusEvent{
-					ID:        fmt.Sprintf("%d", t.UnixNano()),
-					Type:      "liveStatus",
-					Timestamp: t.UnixMilli(),
-					Text:      "存活中",
-				},
-			}
-			// SSE格式：data: <json>\n\n
-			jsonStr, _ := json.Marshal(msg)
-			c.Writer.Write([]byte("data: "))
-			c.Writer.Write(jsonStr)
-			c.Writer.Write([]byte("\n\n"))
-			c.Writer.Flush()
-		}
+	sessionId := c.Param("sessionId")
+	if sessionId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "sessionId不能为空",
+			"data":    nil,
+		})
+		return
 	}
+
+	// 验证sessionId格式
+	if !isValidSessionID(sessionId) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "无效的sessionId格式",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 验证任务是否存在
+	session, err := tm.taskStore.GetSession(sessionId)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"status":  1,
+			"message": "任务不存在",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 验证用户权限（只有任务创建者才能查看）
+	username := c.GetString("username")
+	if session.Username != username {
+		c.JSON(http.StatusForbidden, gin.H{
+			"status":  1,
+			"message": "无权限查看此任务",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 建立SSE连接
+	err = tm.EstablishSSEConnection(c.Writer, sessionId, username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  1,
+			"message": "建立SSE连接失败: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	// 保持连接活跃，等待客户端断开
+	<-c.Request.Context().Done()
+
+	// 客户端断开连接时，清理SSE连接
+	tm.CloseSSESession(sessionId)
 }
 
 // 新建任务接口
@@ -137,19 +159,21 @@ func HandleTaskCreate(c *gin.Context, tm *TaskManager) {
 		return
 	}
 
-	// 从IOA中间件获取员工ID
-	userID, exists := c.Get("user_id")
-	if !exists || userID.(string) == "" {
+	// 验证sessionId格式
+	if !isValidSessionID(req.SessionID) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
-			"message": "用户未认证，请先登录",
+			"message": "无效的会话ID格式",
 			"data":    nil,
 		})
 		return
 	}
 
-	// 设置用户ID到请求中
-	req.UserID = userID.(string)
+	// 从中间件获取用户名
+	username := c.GetString("username")
+
+	// 设置用户名到请求中
+	req.Username = username
 
 	// 调用TaskManager
 	err := tm.AddTask(&req)
@@ -193,19 +217,11 @@ func HandleTerminateTask(c *gin.Context, tm *TaskManager) {
 		return
 	}
 
-	// 从IOA中间件获取员工ID
-	userID, exists := c.Get("user_id")
-	if !exists || userID.(string) == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  1,
-			"message": "用户未认证，请先登录",
-			"data":    nil,
-		})
-		return
-	}
+	// 从中间件获取用户名
+	username := c.GetString("username")
 
 	// 调用TaskManager（包含权限验证）
-	err := tm.TerminateTask(sessionId, userID.(string))
+	err := tm.TerminateTask(sessionId, username)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
@@ -264,19 +280,11 @@ func HandleUpdateTask(c *gin.Context, tm *TaskManager) {
 		return
 	}
 
-	// 从IOA中间件获取员工ID
-	userID, exists := c.Get("user_id")
-	if !exists || userID.(string) == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  1,
-			"message": "用户未认证，请先登录",
-			"data":    nil,
-		})
-		return
-	}
+	// 从中间件获取用户名
+	username := c.GetString("username")
 
 	// 执行任务信息更新（包含权限验证）
-	err := tm.UpdateTask(sessionId, &req, userID.(string))
+	err := tm.UpdateTask(sessionId, &req, username)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
@@ -315,19 +323,11 @@ func HandleDeleteTask(c *gin.Context, tm *TaskManager) {
 		return
 	}
 
-	// 从IOA中间件获取员工ID
-	userID, exists := c.Get("user_id")
-	if !exists || userID.(string) == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  1,
-			"message": "用户未认证，请先登录",
-			"data":    nil,
-		})
-		return
-	}
+	// 从中间件获取用户名
+	username := c.GetString("username")
 
 	// 执行任务删除（包含权限验证）
-	err := tm.DeleteTask(sessionId, userID.(string))
+	err := tm.DeleteTask(sessionId, username)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
@@ -346,17 +346,6 @@ func HandleDeleteTask(c *gin.Context, tm *TaskManager) {
 
 // 文件上传接口
 func HandleUploadFile(c *gin.Context, tm *TaskManager) {
-	// 从IOA中间件获取员工ID
-	userID, exists := c.Get("user_id")
-	if !exists || userID.(string) == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  1,
-			"message": "用户未认证，请先登录",
-			"data":    nil,
-		})
-		return
-	}
-
 	// 获取上传的文件
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -379,7 +368,7 @@ func HandleUploadFile(c *gin.Context, tm *TaskManager) {
 	}
 
 	// 执行文件上传
-	fileUrl, err := tm.UploadFile(file)
+	uploadResult, err := tm.UploadFile(file)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
@@ -393,26 +382,19 @@ func HandleUploadFile(c *gin.Context, tm *TaskManager) {
 		"status":  0,
 		"message": "文件上传成功",
 		"data": gin.H{
-			"fileUrl": fileUrl,
+			"originalName": uploadResult.OriginalName,
+			"fileUrl":      uploadResult.FileURL,
 		},
 	})
 }
 
 // 获取任务列表接口
 func HandleGetTaskList(c *gin.Context, tm *TaskManager) {
-	// 从IOA中间件获取员工ID
-	userID, exists := c.Get("user_id")
-	if !exists || userID.(string) == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  1,
-			"message": "用户未认证，请先登录",
-			"data":    nil,
-		})
-		return
-	}
+	// 从中间件获取用户名
+	username := c.GetString("username")
 
 	// 获取用户的任务列表
-	tasks, err := tm.GetUserTasks(userID.(string))
+	tasks, err := tm.GetUserTasks(username)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,

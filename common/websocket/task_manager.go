@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"time"
 
@@ -26,13 +28,23 @@ type TaskManager struct {
 	tasks        map[string]*TaskCreateRequest // sessionId -> 任务请求
 	agentManager *AgentManager                 // 新增：引用 AgentManager
 	taskStore    *database.TaskStore           // 新增：引用 TaskStore
+	fileConfig   *FileUploadConfig             // 新增：文件上传配置
+	sseManager   *SSEManager                   // 新增：SSE管理器
 }
 
-func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore) *TaskManager {
+func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, fileConfig *FileUploadConfig, sseManager *SSEManager) *TaskManager {
+	if fileConfig == nil {
+		fileConfig = DefaultFileUploadConfig()
+	}
+	if sseManager == nil {
+		sseManager = NewSSEManager()
+	}
 	return &TaskManager{
 		tasks:        make(map[string]*TaskCreateRequest),
 		agentManager: agentManager, // 注入 AgentManager
 		taskStore:    taskStore,    // 注入 TaskStore
+		fileConfig:   fileConfig,   // 注入文件上传配置
+		sseManager:   sseManager,   // 注入SSE管理器
 	}
 }
 
@@ -41,8 +53,26 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// 存储任务
+	// 存储任务到内存
 	tm.tasks[req.SessionID] = req
+
+	// 在数据库中创建会话记录
+	session := &database.Session{
+		ID:            req.SessionID,
+		Username:      req.Username,
+		Title:         generateTitle(req.Content),
+		TaskType:      req.Task,
+		Content:       req.Content,
+		Params:        mustMarshalJSON(req.Params),
+		Attachments:   mustMarshalJSON(req.Attachments),
+		Status:        "doing",
+		AssignedAgent: "",
+	}
+
+	err := tm.taskStore.CreateSession(session)
+	if err != nil {
+		return fmt.Errorf("创建会话记录失败: %v", err)
+	}
 
 	// 异步分发任务
 	go tm.dispatchTask(req.SessionID)
@@ -63,6 +93,7 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 	// 1. 获取任务
 	task, exists := tm.GetTask(sessionId)
 	if !exists {
+		gologger.Errorf("Task not found for sessionId: %s", sessionId)
 		return
 	}
 
@@ -76,7 +107,14 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 	// 3. 选择 Agent（简单策略）
 	selectedAgent := availableAgents[0]
 
-	// 4. 构造任务分配消息
+	// 4. 更新session的assigned_agent和开始时间
+	err := tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, selectedAgent.agentID)
+	if err != nil {
+		gologger.Errorf("Failed to update session assigned agent: %v", err)
+		return
+	}
+
+	// 5. 构造任务分配消息
 	taskMsg := WSMessage{
 		Type: WSMsgTypeTaskAssign,
 		Content: TaskContent{
@@ -89,34 +127,53 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 		},
 	}
 
-	// 5. 发送给 Agent
-	selectedAgent.conn.WriteJSON(taskMsg)
+	// 6. 发送给 Agent
+	err = selectedAgent.conn.WriteJSON(taskMsg)
+	if err != nil {
+		gologger.Errorf("Failed to send task to agent %s: %v", selectedAgent.agentID, err)
+		// 如果发送失败，可以重置assigned_agent
+		tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, "")
+		return
+	}
+
+	gologger.Infof("Task %s assigned to agent %s", task.SessionID, selectedAgent.agentID)
 }
 
-// 处理 Agent 返回的事件
-func (tm *TaskManager) HandleAgentEvent(eventType string, event interface{}) {
-	// 根据事件类型处理
+// HandleAgentEvent 处理来自Agent的事件
+func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, event interface{}) {
+	gologger.Debugf("收到Agent事件: sessionId=%s, eventType=%s", sessionId, eventType)
+
+	// 直接使用通用事件处理函数
+	tm.handleEvent(sessionId, eventType, event)
+
+	// 根据事件类型记录特定日志
 	switch eventType {
 	case "liveStatus":
-		if liveEvent, ok := event.(LiveStatusEvent); ok {
-			tm.handleLiveStatusEvent(liveEvent)
+		if liveStatusEvent, ok := event.(LiveStatusEvent); ok {
+			gologger.Debugf("liveStatus事件详情: sessionId=%s, text=%s", sessionId, liveStatusEvent.Text)
 		}
 	case "planUpdate":
-		if planEvent, ok := event.(PlanUpdateEvent); ok {
-			tm.handlePlanUpdateEvent(planEvent)
+		if planUpdateEvent, ok := event.(PlanUpdateEvent); ok {
+			gologger.Debugf("planUpdate事件详情: sessionId=%s, tasks=%d", sessionId, len(planUpdateEvent.Tasks))
 		}
 	case "newPlanStep":
-		if stepEvent, ok := event.(NewPlanStepEvent); ok {
-			tm.handleNewPlanStepEvent(stepEvent)
+		if newPlanStepEvent, ok := event.(NewPlanStepEvent); ok {
+			gologger.Debugf("newPlanStep事件详情: sessionId=%s, stepId=%s", sessionId, newPlanStepEvent.StepID)
 		}
 	case "statusUpdate":
-		if statusEvent, ok := event.(StatusUpdateEvent); ok {
-			tm.handleStatusUpdateEvent(statusEvent)
+		if statusUpdateEvent, ok := event.(StatusUpdateEvent); ok {
+			gologger.Debugf("statusUpdate事件详情: sessionId=%s, status=%s", sessionId, statusUpdateEvent.AgentStatus)
 		}
 	case "toolUsed":
-		if toolEvent, ok := event.(ToolUsedEvent); ok {
-			tm.handleToolUsedEvent(toolEvent)
+		if toolUsedEvent, ok := event.(ToolUsedEvent); ok {
+			gologger.Debugf("toolUsed事件详情: sessionId=%s, tools=%d", sessionId, len(toolUsedEvent.Tools))
 		}
+	case "actionLog":
+		if actionLogEvent, ok := event.(ActionLogEvent); ok {
+			gologger.Debugf("actionLog事件详情: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
+		}
+	default:
+		gologger.Warnf("未知的事件类型: %s", eventType)
 	}
 }
 
@@ -138,36 +195,54 @@ func generateUUID() string {
 	return fmt.Sprintf("%d_%d", time.Now().UnixNano(), time.Now().Unix())
 }
 
-// 处理各种事件的具体方法
-func (tm *TaskManager) handleLiveStatusEvent(event LiveStatusEvent) {
-	// 这里可以添加事件存储逻辑
-	// tm.storeEvent(event)
+// 通用事件处理函数
+func (tm *TaskManager) handleEvent(sessionId string, eventType string, event interface{}) {
+	// 生成事件ID
+	id := generateEventID()
 
-	// 推送给前端 SSE（需要实现 SSE 连接管理）
-	// tm.pushEventToSSE(event)
+	// 获取事件的时间戳
+	timestamp := getEventTimestamp(event)
 
-	// 更新任务状态
-	// tm.updateTaskStatus(event.SessionID, "running")
+	// 存储事件到数据库
+	err := tm.taskStore.StoreEvent(id, sessionId, eventType, event, timestamp)
+	if err != nil {
+		gologger.Errorf("存储%s事件失败: %v", eventType, err)
+		return
+	}
+
+	// 推送给前端 SSE
+	err = tm.sseManager.SendEvent(id, sessionId, eventType, event)
+	if err != nil {
+		gologger.Errorf("推送%s事件到SSE失败: %v", eventType, err)
+		return
+	}
+
+	// 记录日志
+	gologger.Debugf("%s事件已处理: sessionId=%s", eventType, sessionId)
 }
 
-func (tm *TaskManager) handlePlanUpdateEvent(event PlanUpdateEvent) {
-	// 处理计划更新事件
-}
+// getEventTimestamp 获取事件的时间戳
+func getEventTimestamp(event interface{}) int64 {
+	// 使用反射获取Timestamp字段
+	v := reflect.ValueOf(event)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
 
-func (tm *TaskManager) handleNewPlanStepEvent(event NewPlanStepEvent) {
-	// 处理新计划步骤事件
-}
+	if v.Kind() == reflect.Struct {
+		if field := v.FieldByName("Timestamp"); field.IsValid() && field.CanInterface() {
+			if timestamp, ok := field.Interface().(int64); ok {
+				return timestamp
+			}
+		}
+	}
 
-func (tm *TaskManager) handleStatusUpdateEvent(event StatusUpdateEvent) {
-	// 处理状态更新事件
-}
-
-func (tm *TaskManager) handleToolUsedEvent(event ToolUsedEvent) {
-	// 处理插件使用事件
+	// 如果无法获取时间戳，使用当前时间
+	return time.Now().UnixMilli()
 }
 
 // TerminateTask 终止任务
-func (tm *TaskManager) TerminateTask(sessionId string, userID string) error {
+func (tm *TaskManager) TerminateTask(sessionId string, username string) error {
 	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
@@ -175,7 +250,7 @@ func (tm *TaskManager) TerminateTask(sessionId string, userID string) error {
 	}
 
 	// 验证用户权限（只有任务创建者才能终止任务）
-	if session.UserID != userID {
+	if session.Username != username {
 		return fmt.Errorf("无权限操作此任务")
 	}
 
@@ -221,18 +296,17 @@ func (tm *TaskManager) sendTerminationEvent(sessionId string) {
 	event := StatusUpdateEvent{
 		ID:          generateEventID(),
 		Type:        "statusUpdate",
-		Timestamp:   time.Now().Unix(),
+		Timestamp:   time.Now().UnixMilli(),
 		AgentStatus: "terminated",
 		Brief:       "任务已终止",
 		Description: "用户主动终止了任务执行",
 		NoRender:    false,
 	}
 
-	// 存储事件
-	tm.taskStore.StoreEvent(sessionId, "statusUpdate", event, event.Timestamp)
+	// 使用通用事件处理函数
+	tm.handleEvent(sessionId, "statusUpdate", event)
 
-	// 推送给前端 SSE（需要实现 SSE 推送逻辑）
-	// tm.pushEventToSSE(sessionId, "statusUpdate", event)
+	gologger.Infof("终止事件已发送: sessionId=%s", sessionId)
 }
 
 // generateEventID 生成事件ID
@@ -241,7 +315,7 @@ func generateEventID() string {
 }
 
 // UpdateTask 更新任务信息
-func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest, userID string) error {
+func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest, username string) error {
 	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
@@ -249,30 +323,28 @@ func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest, user
 	}
 
 	// 验证用户权限（只有任务创建者才能更新任务）
-	if session.UserID != userID {
+	if session.Username != username {
 		return fmt.Errorf("无权限操作此任务")
 	}
 
 	// 更新任务信息
-	updates := map[string]interface{}{
-		"updated_at": time.Now(),
-	}
+	updates := map[string]interface{}{}
 
 	if req.Title != "" {
 		updates["title"] = req.Title
 	}
 
 	// 执行数据库更新
-	// err = tm.taskStore.UpdateSession(sessionId, updates)
+	err = tm.taskStore.UpdateSession(sessionId, updates)
 	if err != nil {
-		return fmt.Errorf("更新任务信息失败")
+		return fmt.Errorf("更新任务信息失败: %v", err)
 	}
 
 	return nil
 }
 
 // DeleteTask 删除任务
-func (tm *TaskManager) DeleteTask(sessionId string, userID string) error {
+func (tm *TaskManager) DeleteTask(sessionId string, username string) error {
 	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
@@ -280,7 +352,7 @@ func (tm *TaskManager) DeleteTask(sessionId string, userID string) error {
 	}
 
 	// 验证用户权限（只有任务创建者才能删除任务）
-	if session.UserID != userID {
+	if session.Username != username {
 		return fmt.Errorf("无权限操作此任务")
 	}
 
@@ -292,11 +364,10 @@ func (tm *TaskManager) DeleteTask(sessionId string, userID string) error {
 	// }
 
 	// 删除会话记录
-	// 数据库操作：删除 Session 记录
-	// err = tm.taskStore.DeleteSession(sessionId)
-	// if err != nil {
-	//     return fmt.Errorf("删除任务失败: %v", err)
-	// }
+	err = tm.taskStore.DeleteSession(sessionId)
+	if err != nil {
+		return fmt.Errorf("删除任务失败: %v", err)
+	}
 
 	// 清理内存中的任务数据
 	tm.mu.Lock()
@@ -306,15 +377,24 @@ func (tm *TaskManager) DeleteTask(sessionId string, userID string) error {
 	return nil
 }
 
+// UploadFileResult 文件上传结果
+type UploadFileResult struct {
+	OriginalName string `json:"original_name"` // 原始文件名
+	FileURL      string `json:"file_url"`      // 文件访问URL
+}
+
 // UploadFile 上传文件
-func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (string, error) {
+func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (*UploadFileResult, error) {
+	// 保存原始文件名
+	originalName := file.Filename
+
 	// 生成安全的唯一文件名
 	fileName := generateSecureFileName(file.Filename)
 
-	// 创建上传目录
-	uploadDir := "./uploads"
+	// 使用配置的上传目录
+	uploadDir := tm.fileConfig.UploadDir
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return "", fmt.Errorf("创建上传目录失败: %v", err)
+		return nil, fmt.Errorf("创建上传目录失败: %v", err)
 	}
 
 	// 创建文件路径
@@ -323,13 +403,13 @@ func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (string, error) {
 	// 保存文件到本地
 	src, err := file.Open()
 	if err != nil {
-		return "", fmt.Errorf("打开文件失败: %v", err)
+		return nil, fmt.Errorf("打开文件失败: %v", err)
 	}
 	defer src.Close()
 
 	dst, err := os.Create(filePath)
 	if err != nil {
-		return "", fmt.Errorf("创建文件失败: %v", err)
+		return nil, fmt.Errorf("创建文件失败: %v", err)
 	}
 	defer dst.Close()
 
@@ -338,25 +418,28 @@ func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (string, error) {
 	if err != nil {
 		// 清理已创建的文件
 		os.Remove(filePath)
-		return "", fmt.Errorf("保存文件失败: %v", err)
+		return nil, fmt.Errorf("保存文件失败: %v", err)
 	}
 
 	// 验证写入的文件大小
 	if written != file.Size {
 		os.Remove(filePath)
-		return "", fmt.Errorf("文件写入不完整")
+		return nil, fmt.Errorf("文件写入不完整")
 	}
 
-	// 返回文件URL
-	fileUrl := fmt.Sprintf("/uploads/%s", fileName)
+	// 生成文件访问URL
+	fileURL := tm.fileConfig.GetFileURL(fileName)
 
-	return fileUrl, nil
+	return &UploadFileResult{
+		OriginalName: originalName,
+		FileURL:      fileURL,
+	}, nil
 }
 
-// GetUserTasks 获取任务列表
-func (tm *TaskManager) GetUserTasks(userID string) ([]map[string]interface{}, error) {
-	// 从数据库获取用户的所有会话
-	sessions, err := tm.taskStore.GetUserSessions(userID)
+// GetUserTasks 获取指定用户的任务列表，只返回属于该用户的会话，确保用户只能看到自己的任务。
+func (tm *TaskManager) GetUserTasks(username string) ([]map[string]interface{}, error) {
+	// 从数据库获取用户的所有会话（已做严格过滤）
+	sessions, err := tm.taskStore.GetUserSessions(username)
 	if err != nil {
 		return nil, fmt.Errorf("获取用户任务失败: %v", err)
 	}
@@ -365,12 +448,11 @@ func (tm *TaskManager) GetUserTasks(userID string) ([]map[string]interface{}, er
 	var tasks []map[string]interface{}
 	for _, session := range sessions {
 		task := map[string]interface{}{
-			"id":        session.ID,
+			"sessionId": session.ID,
 			"title":     session.Title,
-			"content":   session.Content,
+			"taskType":  session.TaskType,
 			"status":    session.Status,
-			"createdAt": session.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updatedAt": session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			"updatedAt": session.UpdatedAt, // 直接使用时间戳毫秒级
 		}
 		tasks = append(tasks, task)
 	}
@@ -380,8 +462,10 @@ func (tm *TaskManager) GetUserTasks(userID string) ([]map[string]interface{}, er
 
 // 辅助函数：生成任务标题
 func generateTitle(content string) string {
-	if len(content) > 50 {
-		return content[:50]
+	// 使用rune来正确处理UTF-8字符，避免截断中文字符
+	runes := []rune(content)
+	if len(runes) > 50 {
+		return string(runes[:50])
 	}
 	return content
 }
@@ -396,4 +480,27 @@ func mustMarshalJSON(v interface{}) datatypes.JSON {
 		return datatypes.JSON("{}")
 	}
 	return datatypes.JSON(data)
+}
+
+// EstablishSSEConnection 建立SSE连接
+func (tm *TaskManager) EstablishSSEConnection(w http.ResponseWriter, sessionId string, username string) error {
+	return tm.sseManager.AddConnection(sessionId, username, w)
+}
+
+// CloseSSESession 关闭SSE会话
+func (tm *TaskManager) CloseSSESession(sessionId string) {
+	tm.sseManager.RemoveConnection(sessionId)
+}
+
+// 任务完成时的清理
+func (tm *TaskManager) cleanupTask(sessionId string) {
+	// 清理内存中的任务数据
+	tm.mu.Lock()
+	delete(tm.tasks, sessionId)
+	tm.mu.Unlock()
+
+	// 关闭SSE连接
+	tm.CloseSSESession(sessionId)
+
+	gologger.Infof("任务清理完成: sessionId=%s", sessionId)
 }

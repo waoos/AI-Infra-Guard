@@ -6,7 +6,7 @@ package websocket
 type TaskCreateRequest struct {
 	ID             string                 `json:"id"`             // 消息ID（前端生成的对话ID）
 	SessionID      string                 `json:"sessionId"`      // 会话ID（任务ID）
-	UserID         string                 `json:"userId"`         // 用户ID（可选，不传默认为公共用户）
+	Username       string                 `json:"username"`       // 用户名（可选，不传默认为公共用户）
 	Task           string                 `json:"task"`           // 任务类型
 	Timestamp      int64                  `json:"timestamp"`      // 时间戳
 	Content        string                 `json:"content"`        // 任务内容描述
@@ -68,19 +68,37 @@ type StatusUpdateEvent struct {
 	PlanStepID  string `json:"planStepId"`
 }
 
-// toolUsed 事件体
+// toolUsed 事件体（支持多工具并行）
 type ToolUsedEvent struct {
 	ID          string      `json:"id"`
 	Type        string      `json:"type"`
 	Timestamp   int64       `json:"timestamp"`
-	ActionID    string      `json:"actionId"`
-	Tool        string      `json:"tool"`
-	Status      string      `json:"status"`
-	PlanStepID  string      `json:"planStepId"`
-	Brief       string      `json:"brief"`
 	Description string      `json:"description"`
-	Message     interface{} `json:"message"`
-	Detail      interface{} `json:"detail"`
+	PlanStepID  string      `json:"planStepId"`
+	StatusID    string      `json:"statusId"` // 关联的状态，一个状态可以对应多个插件
+	Tools       []ToolInfo  `json:"tools"`    // 工具列表
+	Detail      interface{} `json:"detail"`   // 详细信息
+}
+
+// 工具信息
+type ToolInfo struct {
+	ToolID  string      `json:"toolId"`
+	Tool    string      `json:"tool"`
+	Status  string      `json:"status"` // done, doing, failed
+	Brief   string      `json:"brief"`
+	Message interface{} `json:"message"`
+	Result  string      `json:"result"` // 最终执行结果
+}
+
+// actionLog 事件体
+type ActionLogEvent struct {
+	ID         string `json:"id"`
+	Type       string `json:"type"`
+	Timestamp  int64  `json:"timestamp"`
+	ActionID   string `json:"actionId"`
+	Tool       string `json:"tool"`
+	PlanStepID string `json:"planStepId"`
+	ActionLog  string `json:"actionLog"`
 }
 
 // 任务分配消息（Server -> Agent）

@@ -33,7 +33,19 @@ func RunWebServer(options *options.Options) {
 
 	// 初始化AgentManager
 	agentManager := NewAgentManager()
-	taskManager := NewTaskManager(agentManager, taskStore)
+
+	// 初始化文件上传配置（支持环境变量）
+	fileConfig := LoadFileUploadConfigFromEnv()
+
+	// 验证文件上传配置
+	if err := fileConfig.ValidateConfig(); err != nil {
+		gologger.Fatalf("文件上传配置验证失败: %v", err)
+	}
+
+	// 初始化SSE管理器
+	sseManager := NewSSEManager()
+
+	taskManager := NewTaskManager(agentManager, taskStore, fileConfig, sseManager)
 
 	// 将 TaskManager 注入到 AgentManager
 	agentManager.SetTaskManager(taskManager)
@@ -81,7 +93,7 @@ func RunWebServer(options *options.Options) {
 		}
 
 		// 3. AI应用安全中心
-		appSecurity := v1.Group("/app-security")
+		appSecurity := v1.Group("/app")
 		{
 			// 应用IOA中间件
 			appSecurity.Use(setupIOAMiddleware())
@@ -89,8 +101,12 @@ func RunWebServer(options *options.Options) {
 			// 任务管理
 			tasks := appSecurity.Group("/tasks")
 			{
+				// 获取任务列表接口
+				tasks.GET("", func(c *gin.Context) {
+					HandleGetTaskList(c, taskManager)
+				})
 				// SSE接口
-				tasks.GET("/sse", func(c *gin.Context) {
+				tasks.GET("/sse/:sessionId", func(c *gin.Context) {
 					HandleTaskSSE(c, taskManager)
 				})
 				// 新建任务接口
@@ -101,7 +117,7 @@ func RunWebServer(options *options.Options) {
 				tasks.POST("/uploadFile", func(c *gin.Context) {
 					HandleUploadFile(c, taskManager)
 				})
-				// 更新任务信息接口
+				// 编辑任务接口
 				tasks.PUT("/:sessionId", func(c *gin.Context) {
 					HandleUpdateTask(c, taskManager)
 				})
@@ -162,6 +178,13 @@ func RunWebServer(options *options.Options) {
 		c.Data(200, mimeType, assetData)
 	})
 
+	// 添加文件访问路由 - 确保上传的文件可以被访问
+	if fileConfig.BaseURL != "" {
+		// 设置静态文件服务，将URL路径映射到实际存储目录
+		r.Static(fileConfig.BaseURL, fileConfig.UploadDir)
+		gologger.Infof("文件访问路由已配置: %s -> %s", fileConfig.BaseURL, fileConfig.UploadDir)
+	}
+
 	// 启动服务器
 	gologger.Infof("Starting WebServer on http://%s\n", options.WebServerAddr)
 	if err := r.Run(options.WebServerAddr); err != nil {
@@ -169,19 +192,19 @@ func RunWebServer(options *options.Options) {
 	}
 }
 
-// 配置IOA中间件
+// 配置身份认证中间件
 func setupIOAMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 只需要读取staffid作为userId
-		staffID := c.GetHeader("staffid")
+		// 优先从请求头获取username字段
+		username := c.GetHeader("username")
+
+		// 如果都没有，使用默认的公共用户
+		if username == "" {
+			username = "public_user"
+		}
 
 		// 存储到gin上下文
-		c.Set("user_id", staffID)
-
-		// // 如果没有员工信息，使用默认用户
-		// if staffID == "" {
-		// 	c.Set("user_id", "public_user")
-		// }
+		c.Set("username", username)
 
 		c.Next()
 	}

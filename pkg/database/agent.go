@@ -15,9 +15,9 @@ type Agent struct {
 	Version      string         `gorm:"column:version" json:"version"`
 	Capabilities datatypes.JSON `gorm:"column:capabilities" json:"capabilities"` // 存储为JSON
 	Meta         string         `gorm:"column:meta;not null" json:"meta"`
-	LastSeen     time.Time      `gorm:"column:last_seen;not null" json:"last_seen"`
-	CreatedAt    time.Time      `gorm:"column:created_at;not null" json:"created_at"`
-	UpdatedAt    time.Time      `gorm:"column:updated_at;not null" json:"updated_at"`
+	LastSeen     int64          `gorm:"column:last_seen;not null" json:"last_seen"`   // 时间戳毫秒级
+	CreatedAt    int64          `gorm:"column:created_at;not null" json:"created_at"` // 时间戳毫秒级
+	UpdatedAt    int64          `gorm:"column:updated_at;not null" json:"updated_at"` // 时间戳毫秒级
 	Online       bool           `gorm:"column:online;not null;default:false" json:"online"`
 }
 
@@ -37,9 +37,9 @@ func (s *AgentStore) Init() error {
 
 // Register 注册或更新agent信息
 func (s *AgentStore) Register(agent *Agent) error {
-	now := time.Now()
+	now := time.Now().UnixMilli()
 	agent.LastSeen = now
-	if agent.CreatedAt.IsZero() {
+	if agent.CreatedAt == 0 {
 		agent.CreatedAt = now
 	}
 	agent.UpdatedAt = now
@@ -68,9 +68,10 @@ func (s *AgentStore) ListAgents() ([]*Agent, error) {
 
 // UpdateLastSeen 更新agent的最后在线时间
 func (s *AgentStore) UpdateLastSeen(id string) error {
+	now := time.Now().UnixMilli()
 	return s.db.Model(&Agent{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"last_seen":  time.Now(),
-		"updated_at": time.Now(),
+		"last_seen":  now,
+		"updated_at": now,
 	}).Error
 }
 
