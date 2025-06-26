@@ -412,3 +412,46 @@ func HandleGetTaskList(c *gin.Context, tm *TaskManager) {
 		},
 	})
 }
+
+// HandleGetTaskDetail 获取任务详情
+func HandleGetTaskDetail(c *gin.Context, tm *TaskManager) {
+	sessionId := c.Param("sessionId")
+	if sessionId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "sessionId不能为空",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 验证sessionId格式
+	if !isValidSessionID(sessionId) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "无效的sessionId格式",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 获取用户信息
+	username := c.GetString("username")
+
+	// 获取任务详情
+	detail, err := tm.GetTaskDetail(sessionId, username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  1,
+			"message": "获取任务详情失败: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  0,
+		"message": "获取任务详情成功",
+		"data":    detail,
+	})
+}

@@ -101,6 +101,22 @@ type ActionLogEvent struct {
 	ActionLog  string `json:"actionLog"`
 }
 
+// resultUpdate 事件体（任务完成结果）
+type ResultUpdateEvent struct {
+	ID        string     `json:"id"`
+	Type      string     `json:"type"`
+	Timestamp int64      `json:"timestamp"`
+	Result    ResultInfo `json:"result"`
+}
+
+// 结果信息
+type ResultInfo struct {
+	Brief       string `json:"brief"`       // 简短描述
+	Description string `json:"description"` // 详细描述
+	FileName    string `json:"fileName"`    // 文件名
+	FileURL     string `json:"fileUrl"`     // 文件访问URL
+}
+
 // 任务分配消息（Server -> Agent）
 type TaskAssignMessage struct {
 	Type    string      `json:"type"`

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -172,6 +173,13 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 		if actionLogEvent, ok := event.(ActionLogEvent); ok {
 			gologger.Debugf("actionLog事件详情: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
 		}
+	case "resultUpdate":
+		if resultUpdateEvent, ok := event.(ResultUpdateEvent); ok {
+			gologger.Debugf("resultUpdate事件详情: sessionId=%s, fileName=%s",
+				sessionId, resultUpdateEvent.Result.FileName)
+			// 任务完成，可以清理资源
+			go tm.cleanupTask(sessionId)
+		}
 	default:
 		gologger.Warnf("未知的事件类型: %s", eventType)
 	}
@@ -182,15 +190,17 @@ func generateSecureFileName(originalName string) string {
 	// 获取文件扩展名
 	ext := filepath.Ext(originalName)
 
-	// 生成UUID作为文件名前缀
+	// 获取不带扩展名的原始文件名
+	baseName := strings.TrimSuffix(originalName, ext)
+
+	// 生成UUID
 	uuid := generateUUID()
 
-	// 组合：UUID + 时间戳 + 扩展名
-	timestamp := time.Now().Format("20060102150405")
-	return fmt.Sprintf("%s_%s%s", uuid, timestamp, ext)
+	// 组合：UUID_原始文件名.扩展名
+	return fmt.Sprintf("%s_%s%s", uuid, baseName, ext)
 }
 
-// generateUUID 生成简单的UUID（实际项目中建议使用标准UUID库）
+// generateUUID 生成简单的UUID
 func generateUUID() string {
 	return fmt.Sprintf("%d_%d", time.Now().UnixNano(), time.Now().Unix())
 }
@@ -356,23 +366,62 @@ func (tm *TaskManager) DeleteTask(sessionId string, username string) error {
 		return fmt.Errorf("无权限操作此任务")
 	}
 
-	// 删除相关的消息记录
-	// 数据库操作：删除该会话下的所有 TaskMessage 记录
-	// err = tm.taskStore.DeleteSessionMessages(sessionId)
-	// if err != nil {
-	//     return fmt.Errorf("删除任务消息失败: %v", err)
-	// }
-
-	// 删除会话记录
-	err = tm.taskStore.DeleteSession(sessionId)
+	// 使用事务删除会话及其所有消息
+	err = tm.taskStore.DeleteSessionWithMessages(sessionId)
 	if err != nil {
 		return fmt.Errorf("删除任务失败: %v", err)
+	}
+
+	// 删除附件文件
+	err = tm.deleteSessionAttachments(session)
+	if err != nil {
+		gologger.Warnf("删除附件文件失败: %v", err)
+		// 附件删除失败不影响主流程，只记录警告
 	}
 
 	// 清理内存中的任务数据
 	tm.mu.Lock()
 	delete(tm.tasks, sessionId)
 	tm.mu.Unlock()
+
+	// 关闭SSE连接
+	tm.CloseSSESession(sessionId)
+
+	gologger.Infof("任务删除完成: sessionId=%s", sessionId)
+	return nil
+}
+
+// deleteSessionAttachments 删除会话的附件文件
+func (tm *TaskManager) deleteSessionAttachments(session *database.Session) error {
+	if session.Attachments == nil {
+		return nil
+	}
+
+	var attachmentURLs []string
+	if err := json.Unmarshal(session.Attachments, &attachmentURLs); err != nil {
+		return fmt.Errorf("解析附件URL失败: %v", err)
+	}
+
+	for _, url := range attachmentURLs {
+		// 从URL中提取文件名
+		fileName := tm.extractFileNameFromURL(url)
+		if fileName == url {
+			// 如果无法提取文件名，跳过
+			continue
+		}
+
+		// 构建完整的文件路径
+		filePath := filepath.Join(tm.fileConfig.UploadDir, fileName)
+
+		// 删除文件
+		if err := os.Remove(filePath); err != nil {
+			if !os.IsNotExist(err) {
+				gologger.Warnf("删除附件文件失败: %s, error: %v", filePath, err)
+			}
+		} else {
+			gologger.Debugf("删除附件文件成功: %s", filePath)
+		}
+	}
 
 	return nil
 }
@@ -503,4 +552,95 @@ func (tm *TaskManager) cleanupTask(sessionId string) {
 	tm.CloseSSESession(sessionId)
 
 	gologger.Infof("任务清理完成: sessionId=%s", sessionId)
+}
+
+// GetTaskDetail 获取任务详情
+func (tm *TaskManager) GetTaskDetail(sessionId string, username string) (map[string]interface{}, error) {
+	// 检查任务是否存在
+	session, err := tm.taskStore.GetSession(sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("任务不存在")
+	}
+
+	// 验证用户权限（只有任务创建者才能查看）
+	if session.Username != username {
+		return nil, fmt.Errorf("无权限查看此任务")
+	}
+
+	// 获取任务的所有消息
+	messages, err := tm.taskStore.GetSessionMessages(sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("获取任务消息失败: %v", err)
+	}
+
+	// 处理附件信息
+	var files []map[string]interface{}
+	if session.Attachments != nil {
+		var attachmentURLs []string
+		if err := json.Unmarshal(session.Attachments, &attachmentURLs); err == nil {
+			for _, url := range attachmentURLs {
+				// 从URL中提取文件名
+				fileName := tm.extractFileNameFromURL(url)
+				files = append(files, map[string]interface{}{
+					"filename": fileName,
+					"fileUrl":  url,
+				})
+			}
+		}
+	}
+
+	// 处理消息列表
+	var messageList []map[string]interface{}
+	for _, msg := range messages {
+		// 解析事件数据
+		var eventData map[string]interface{}
+		if err := json.Unmarshal(msg.EventData, &eventData); err != nil {
+			gologger.Warnf("解析消息事件数据失败: %v", err)
+			continue
+		}
+
+		messageList = append(messageList, map[string]interface{}{
+			"id":        msg.ID,
+			"type":      msg.Type,
+			"timestamp": msg.Timestamp,
+			"event":     eventData,
+		})
+	}
+
+	// 构建返回数据
+	detail := map[string]interface{}{
+		"sessionId": session.ID,
+		"name":      session.Title,
+		"status":    session.Status,
+		"createdAt": session.CreatedAt,
+		"files":     files,
+		"messages":  messageList,
+	}
+
+	return detail, nil
+}
+
+// extractFileNameFromURL 从文件URL中提取原始文件名
+func (tm *TaskManager) extractFileNameFromURL(url string) string {
+	// 新的文件名格式: UUID_原始文件名.扩展名
+	if strings.Contains(url, "/") {
+		parts := strings.Split(url, "/")
+		if len(parts) > 0 {
+			fileName := parts[len(parts)-1]
+
+			// 新的文件名格式: UUID_原始文件名.扩展名
+			if strings.Contains(fileName, "_") {
+				// 查找第一个下划线，之后的部分是原始文件名
+				firstUnderscoreIndex := strings.Index(fileName, "_")
+				if firstUnderscoreIndex > 0 {
+					// 返回下划线后的部分作为原始文件名
+					return fileName[firstUnderscoreIndex+1:]
+				}
+			}
+
+			// 如果没有下划线，直接返回文件名
+			return fileName
+		}
+	}
+	return url
 }

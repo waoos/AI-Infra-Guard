@@ -28,6 +28,7 @@ const (
 	WSMsgTypeNewPlanStep  = "newPlanStep"  // 新计划步骤
 	WSMsgTypeStatusUpdate = "statusUpdate" // 状态更新
 	WSMsgTypeToolUsed     = "toolUsed"     // 工具使用
+	WSMsgTypeResultUpdate = "resultUpdate" // 结果更新
 )
 
 // Agent 端事件消息（Agent -> Server，直接使用 task.go 中的结构体）
@@ -150,7 +151,7 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 				return
 			}
 			ac.mu.Unlock()
-		case WSMsgTypeLiveStatus, WSMsgTypePlanUpdate, WSMsgTypeNewPlanStep, WSMsgTypeStatusUpdate, WSMsgTypeToolUsed:
+		case WSMsgTypeLiveStatus, WSMsgTypePlanUpdate, WSMsgTypeNewPlanStep, WSMsgTypeStatusUpdate, WSMsgTypeToolUsed, WSMsgTypeResultUpdate:
 			// 所有事件类型都统一处理
 			ac.handleAgentEvent(am, wsMsg.Content, wsMsg.Type)
 		default:

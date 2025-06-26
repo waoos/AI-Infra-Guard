@@ -105,6 +105,10 @@ func RunWebServer(options *options.Options) {
 				tasks.GET("", func(c *gin.Context) {
 					HandleGetTaskList(c, taskManager)
 				})
+				// 获取任务详情接口
+				tasks.GET("/:sessionId", func(c *gin.Context) {
+					HandleGetTaskDetail(c, taskManager)
+				})
 				// SSE接口
 				tasks.GET("/sse/:sessionId", func(c *gin.Context) {
 					HandleTaskSSE(c, taskManager)

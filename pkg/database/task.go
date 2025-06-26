@@ -142,6 +142,28 @@ func (s *TaskStore) DeleteSession(sessionID string) error {
 	return s.db.Delete(&Session{}, "id = ?", sessionID).Error
 }
 
+// DeleteSessionMessages 删除会话的所有消息
+func (s *TaskStore) DeleteSessionMessages(sessionID string) error {
+	return s.db.Where("session_id = ?", sessionID).Delete(&TaskMessage{}).Error
+}
+
+// DeleteSessionWithMessages 使用事务删除会话及其所有消息
+func (s *TaskStore) DeleteSessionWithMessages(sessionID string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// 1. 删除会话的所有消息
+		if err := tx.Where("session_id = ?", sessionID).Delete(&TaskMessage{}).Error; err != nil {
+			return fmt.Errorf("删除会话消息失败: %v", err)
+		}
+
+		// 2. 删除会话记录
+		if err := tx.Delete(&Session{}, "id = ?", sessionID).Error; err != nil {
+			return fmt.Errorf("删除会话记录失败: %v", err)
+		}
+
+		return nil
+	})
+}
+
 // CreateTaskMessage 创建任务消息
 func (s *TaskStore) CreateTaskMessage(message *TaskMessage) error {
 	now := time.Now().UnixMilli()
