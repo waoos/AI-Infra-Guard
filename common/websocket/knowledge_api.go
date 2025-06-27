@@ -284,7 +284,7 @@ func HandleListVulnerabilities(options *options.Options) gin.HandlerFunc {
 		pageStr := c.DefaultQuery("page", "1")
 		sizeStr := c.DefaultQuery("size", "10")
 		cveQuery := strings.ToLower(c.DefaultQuery("cve", ""))
-		severityQuery := strings.ToLower(c.DefaultQuery("severity", ""))
+		// severityQuery := strings.ToLower(c.DefaultQuery("severity", ""))
 		categoryQuery := c.DefaultQuery("category", "")
 		page, _ := strconv.Atoi(pageStr)
 		size, _ := strconv.Atoi(sizeStr)
@@ -315,9 +315,7 @@ func HandleListVulnerabilities(options *options.Options) gin.HandlerFunc {
 			if categoryQuery != "" && fp.FpName != categoryQuery {
 				continue
 			}
-			for _, vul := range fp.Vuls {
-				allVuls = append(allVuls, vul)
-			}
+			allVuls = append(allVuls, fp.Vuls...)
 		}
 
 		// 4. 条件过滤
@@ -326,7 +324,7 @@ func HandleListVulnerabilities(options *options.Options) gin.HandlerFunc {
 			if cveQuery != "" && !strings.Contains(strings.ToLower(vul.Info.CVEName), cveQuery) {
 				continue
 			}
-			if severityQuery != "" && !strings.Contains(strings.ToLower(vul.Info.Severity), severityQuery) {
+			if categoryQuery != "" && !strings.Contains(strings.ToLower(vul.Info.FingerPrintName), categoryQuery) {
 				continue
 			}
 			filteredVuls = append(filteredVuls, vul)
