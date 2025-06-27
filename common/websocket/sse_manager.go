@@ -179,7 +179,7 @@ func (sm *SSEManager) sendEventToConnection(conn *SSEConnection, id string, even
 	conn.Flusher.Flush()
 	conn.LastPing = time.Now()
 
-	gologger.Info("发送事件: sessionId=%s, eventType=%s", conn.SessionID, eventType)
+	gologger.Infof("发送事件: sessionId=%s, eventType=%s", conn.SessionID, eventType)
 	return nil
 }
 
