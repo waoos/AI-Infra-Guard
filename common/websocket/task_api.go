@@ -455,3 +455,93 @@ func HandleGetTaskDetail(c *gin.Context, tm *TaskManager) {
 		"data":    detail,
 	})
 }
+
+// HandleDownloadFile 文件下载接口
+func HandleDownloadFile(c *gin.Context, tm *TaskManager) {
+	sessionId := c.Param("sessionId")
+	if sessionId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "sessionId不能为空",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 验证sessionId格式
+	if !isValidSessionID(sessionId) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "无效的会话ID格式",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 解析请求体
+	var req struct {
+		FileURL string `json:"fileUrl" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "参数错误: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	// 验证fileUrl格式
+	if req.FileURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  1,
+			"message": "文件URL不能为空",
+			"data":    nil,
+		})
+		return
+	}
+
+	// 获取用户信息
+	username := c.GetString("username")
+
+	// 执行文件下载
+	err := tm.DownloadFile(sessionId, req.FileURL, username, c)
+	if err != nil {
+		// 根据错误类型返回不同的状态码
+		switch err.Error() {
+		case "任务不存在":
+			c.JSON(http.StatusNotFound, gin.H{
+				"status":  1,
+				"message": "任务不存在",
+				"data":    nil,
+			})
+		case "无权限访问此任务":
+			c.JSON(http.StatusForbidden, gin.H{
+				"status":  1,
+				"message": "无权限访问此任务",
+				"data":    nil,
+			})
+		case "文件不存在于此任务中":
+			c.JSON(http.StatusNotFound, gin.H{
+				"status":  1,
+				"message": "文件不存在于此任务中",
+				"data":    nil,
+			})
+		case "文件不存在":
+			c.JSON(http.StatusNotFound, gin.H{
+				"status":  1,
+				"message": "文件不存在",
+				"data":    nil,
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"status":  1,
+				"message": "文件下载失败: " + err.Error(),
+				"data":    nil,
+			})
+		}
+		return
+	}
+
+	// 文件下载成功，响应头已在DownloadFile方法中设置
+}

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
+	"github.com/gin-gonic/gin"
 	"gorm.io/datatypes"
 )
 
@@ -680,4 +683,114 @@ func (tm *TaskManager) extractFileNameFromURL(url string) string {
 		}
 	}
 	return url
+}
+
+// DownloadFile 下载文件
+func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username string, c *gin.Context) error {
+	// 1. 检查任务是否存在
+	session, err := tm.taskStore.GetSession(sessionId)
+	if err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+
+	// 2. 验证用户权限（只有任务创建者才能下载文件）
+	if session.Username != username {
+		return fmt.Errorf("无权限访问此任务")
+	}
+
+	// 3. 验证文件URL是否属于该任务
+	if session.Attachments == nil {
+		return fmt.Errorf("文件不存在于此任务中")
+	}
+
+	var attachmentURLs []string
+	if err := json.Unmarshal(session.Attachments, &attachmentURLs); err != nil {
+		return fmt.Errorf("解析任务附件失败")
+	}
+
+	// 检查fileUrl是否在任务的附件列表中
+	fileExists := false
+	for _, url := range attachmentURLs {
+		if url == fileUrl {
+			fileExists = true
+			break
+		}
+	}
+
+	if !fileExists {
+		return fmt.Errorf("文件不存在于此任务中")
+	}
+
+	// 4. 从fileUrl中提取文件名
+	fileName := tm.extractFileNameFromURL(fileUrl)
+	if fileName == fileUrl {
+		// 如果无法提取文件名，使用URL的最后部分
+		if strings.Contains(fileUrl, "/") {
+			parts := strings.Split(fileUrl, "/")
+			fileName = parts[len(parts)-1]
+		} else {
+			fileName = fileUrl
+		}
+	}
+
+	// 5. 构建本地文件路径（使用URL的最后部分，即完整的文件名）
+	localFileName := ""
+	if strings.Contains(fileUrl, "/") {
+		parts := strings.Split(fileUrl, "/")
+		localFileName = parts[len(parts)-1]
+	} else {
+		localFileName = fileUrl
+	}
+
+	filePath := filepath.Join(tm.fileConfig.UploadDir, localFileName)
+
+	// 添加调试日志
+	gologger.Debugf("文件下载调试信息: fileUrl=%s, localFileName=%s, filePath=%s, uploadDir=%s",
+		fileUrl, localFileName, filePath, tm.fileConfig.UploadDir)
+
+	// 6. 检查文件是否存在
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return fmt.Errorf("文件不存在")
+	}
+
+	// 7. 获取文件信息
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %v", err)
+	}
+
+	// 8. 设置响应头
+	// 获取文件的MIME类型
+	ext := filepath.Ext(fileName)
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	// 设置Content-Type
+	c.Header("Content-Type", mimeType)
+
+	// 设置Content-Disposition，支持中文文件名
+	// 使用UTF-8编码处理中文文件名
+	encodedFileName := url.QueryEscape(fileName)
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"; filename*=UTF-8''%s", fileName, encodedFileName))
+
+	// 设置Content-Length
+	c.Header("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+
+	// 9. 打开文件并流式传输
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("打开文件失败: %v", err)
+	}
+	defer file.Close()
+
+	// 10. 流式传输文件内容
+	_, err = io.Copy(c.Writer, file)
+	if err != nil {
+		return fmt.Errorf("传输文件失败: %v", err)
+	}
+
+	gologger.Infof("文件下载成功: sessionId=%s, fileName=%s, fileSize=%d", sessionId, fileName, fileInfo.Size())
+	return nil
 }

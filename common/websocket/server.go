@@ -121,6 +121,10 @@ func RunWebServer(options *options.Options) {
 				tasks.POST("/uploadFile", func(c *gin.Context) {
 					HandleUploadFile(c, taskManager)
 				})
+				// 文件下载接口
+				tasks.POST("/:sessionId/downloadFile", func(c *gin.Context) {
+					HandleDownloadFile(c, taskManager)
+				})
 				// 编辑任务接口
 				tasks.PUT("/:sessionId", func(c *gin.Context) {
 					HandleUpdateTask(c, taskManager)
@@ -183,11 +187,12 @@ func RunWebServer(options *options.Options) {
 	})
 
 	// 添加文件访问路由 - 确保上传的文件可以被访问
-	if fileConfig.BaseURL != "" {
-		// 设置静态文件服务，将URL路径映射到实际存储目录
-		r.Static(fileConfig.BaseURL, fileConfig.UploadDir)
-		gologger.Infof("文件访问路由已配置: %s -> %s", fileConfig.BaseURL, fileConfig.UploadDir)
-	}
+	// 注释掉静态文件映射，因为我们已经有了专门的下载接口
+	// if fileConfig.BaseURL != "" {
+	// 	// 设置静态文件服务，将URL路径映射到实际存储目录
+	// 	r.Static(fileConfig.BaseURL, fileConfig.UploadDir)
+	// 	gologger.Infof("文件访问路由已配置: %s -> %s", fileConfig.BaseURL, fileConfig.UploadDir)
+	// }
 
 	// 启动服务器
 	gologger.Infof("Starting WebServer on http://%s\n", options.WebServerAddr)
