@@ -83,8 +83,6 @@ func validateTaskUpdateRequest(req *TaskUpdateRequest) error {
 	return nil
 }
 
-// 预留任务相关接口实现
-
 // SSE接口（实时事件推送）
 func HandleTaskSSE(c *gin.Context, tm *TaskManager) {
 	sessionId := c.Param("sessionId")

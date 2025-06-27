@@ -25,6 +25,12 @@ import (
 
 const (
 	WSMsgTypeTaskAssign = "task_assign" // 任务分配
+
+	// 任务状态常量
+	TaskStatusTodo       = "todo"       // 待执行
+	TaskStatusDoing      = "doing"      // 执行中
+	TaskStatusDone       = "done"       // 已完成
+	TaskStatusTerminated = "terminated" // 已终止
 )
 
 type TaskManager struct {
@@ -69,7 +75,7 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 		Content:       req.Content,
 		Params:        mustMarshalJSON(req.Params),
 		Attachments:   mustMarshalJSON(req.Attachments),
-		Status:        "doing",
+		Status:        TaskStatusTodo,
 		AssignedAgent: "",
 		ContryIsoCode: req.ContryIsoCode,
 	}
@@ -200,7 +206,7 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 				sessionId, resultUpdateEvent.Result.FileName)
 
 			// 更新任务状态为已完成
-			err := tm.taskStore.UpdateSessionStatus(sessionId, "completed")
+			err := tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusDone)
 			if err != nil {
 				gologger.Errorf("更新任务状态为已完成失败: %v", err)
 			} else {
@@ -299,7 +305,7 @@ func (tm *TaskManager) TerminateTask(sessionId string, username string) error {
 	}
 
 	// 更新任务状态
-	err = tm.taskStore.UpdateSessionStatus(sessionId, "terminated")
+	err = tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusTerminated)
 	if err != nil {
 		return fmt.Errorf("更新任务状态失败")
 	}

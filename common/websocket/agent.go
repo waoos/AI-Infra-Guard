@@ -265,28 +265,6 @@ func (ac *AgentConnection) handleRegister(am *AgentManager, content interface{})
 	ac.conn.WriteJSON(response)
 }
 
-// handleHeartbeat 处理心跳消息
-// func (ac *AgentConnection) handleHeartbeat(content interface{}) {
-// 	ac.mu.Lock()
-// 	defer ac.mu.Unlock()
-
-// 	contentBytes, _ := json.Marshal(content)
-// 	var hb AgentRegisterContent
-// 	if err := json.Unmarshal(contentBytes, &hb); err != nil {
-// 		ac.sendError("心跳消息格式错误")
-// 		return
-// 	}
-
-// 	// 验证身份一致性
-// 	if ac.agentID == "" || ac.agentID != hb.AgentID {
-// 		ac.sendError("心跳消息身份验证失败")
-// 		return
-// 	}
-
-// 	// ac.store.UpdateLastSeen(hb.AgentID)
-// 	// ac.store.UpdateOnlineStatus(hb.AgentID, true)
-// }
-
 // handleDisconnect 处理主动断开连接
 func (ac *AgentConnection) handleDisconnect(am *AgentManager, content interface{}) {
 	contentBytes, _ := json.Marshal(content)
