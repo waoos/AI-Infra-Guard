@@ -60,13 +60,22 @@ func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, f
 
 // 添加任务
 func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
+	// 先存储任务到内存（dispatchTask需要从内存中获取任务）
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
-
-	// 存储任务到内存
 	tm.tasks[req.SessionID] = req
+	tm.mu.Unlock()
 
-	// 在数据库中创建会话记录
+	// 尝试分发任务
+	err := tm.dispatchTask(req.SessionID)
+	if err != nil {
+		// 分发失败，清理内存中的任务
+		tm.mu.Lock()
+		delete(tm.tasks, req.SessionID)
+		tm.mu.Unlock()
+		return fmt.Errorf("任务分发失败: %v", err)
+	}
+
+	// 任务分发成功，在数据库中创建会话记录
 	session := &database.Session{
 		ID:            req.SessionID,
 		Username:      req.Username,
@@ -80,13 +89,14 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 		ContryIsoCode: req.ContryIsoCode,
 	}
 
-	err := tm.taskStore.CreateSession(session)
+	err = tm.taskStore.CreateSession(session)
 	if err != nil {
+		// 如果存储失败，清理内存中的任务
+		tm.mu.Lock()
+		delete(tm.tasks, req.SessionID)
+		tm.mu.Unlock()
 		return fmt.Errorf("创建会话记录失败: %v", err)
 	}
-
-	// 异步分发任务
-	go tm.dispatchTask(req.SessionID)
 
 	return nil
 }
@@ -100,19 +110,19 @@ func (tm *TaskManager) GetTask(sessionId string) (*TaskCreateRequest, bool) {
 }
 
 // 新增：任务分发方法
-func (tm *TaskManager) dispatchTask(sessionId string) {
+func (tm *TaskManager) dispatchTask(sessionId string) error {
 	// 1. 获取任务
 	task, exists := tm.GetTask(sessionId)
 	if !exists {
 		gologger.Errorf("Task not found for sessionId: %s", sessionId)
-		return
+		return fmt.Errorf("任务不存在")
 	}
 
 	// 2. 获取可用 Agent
 	availableAgents := tm.agentManager.GetAvailableAgents()
 	if len(availableAgents) == 0 {
 		gologger.Info("No available agents")
-		return
+		return fmt.Errorf("没有可用的Agent")
 	}
 
 	// 3. 选择 Agent（简单策略）
@@ -131,7 +141,7 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 		// 如果所有 Agent 都不健康，记录错误并返回
 		if !selectedAgent.IsConnectionHealthy() {
 			gologger.Errorf("所有agent连接都异常 for sessionId: %s", sessionId)
-			return
+			return fmt.Errorf("所有agent连接都异常")
 		}
 	}
 
@@ -139,7 +149,7 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 	err := tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, selectedAgent.agentID)
 	if err != nil {
 		gologger.Errorf("无法更新session的assigned_agent: %v", err)
-		return
+		return fmt.Errorf("无法更新session的assigned_agent")
 	}
 
 	// 6. 构造任务分配消息
@@ -155,16 +165,17 @@ func (tm *TaskManager) dispatchTask(sessionId string) {
 		},
 	}
 
-	// 7. 使用重试机制发送给 Agent
-	err = selectedAgent.SendMessageWithRetry(taskMsg, 3) // 最多重试3次
+	// 7. 使用重试机制发送给 Agent（设置较短的超时时间）
+	err = selectedAgent.SendMessageWithRetry(taskMsg, 1) // 只重试1次，减少等待时间
 	if err != nil {
 		gologger.Errorf("下发任务给 %s 失败: %v", selectedAgent.agentID, err)
 		// 如果发送失败，重置assigned_agent
 		tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, "")
-		return
+		return fmt.Errorf("下发任务给 %s 失败: %v", selectedAgent.agentID, err)
 	}
 
 	gologger.Infof("任务下发成功: sessionId=%s, agentId=%s", task.SessionID, selectedAgent.agentID)
+	return nil
 }
 
 // HandleAgentEvent 处理来自Agent的事件
