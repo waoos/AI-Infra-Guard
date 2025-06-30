@@ -3,7 +3,6 @@ package websocket
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -43,7 +42,7 @@ func (sm *SSEManager) AddConnection(sessionID, username string, w http.ResponseW
 	if existing, exists := sm.connections[sessionID]; exists {
 		// 关闭现有连接
 		close(existing.CloseChan)
-		log.Printf("关闭现有连接: sessionId=%s", sessionID)
+		gologger.Infof("关闭现有连接: sessionId=%s", sessionID)
 	}
 
 	// 检查是否支持SSE
@@ -70,7 +69,7 @@ func (sm *SSEManager) AddConnection(sessionID, username string, w http.ResponseW
 	}
 
 	sm.connections[sessionID] = conn
-	log.Printf("添加SSE连接: sessionId=%s, username=%s", sessionID, username)
+	gologger.Infof("添加SSE连接: sessionId=%s, username=%s", sessionID, username)
 
 	// 发送连接成功消息
 	sm.sendEventToConnection(conn, "connected", "connected", map[string]interface{}{
@@ -86,35 +85,38 @@ func (sm *SSEManager) AddConnection(sessionID, username string, w http.ResponseW
 
 // keepConnectionAlive 保持连接活跃
 func (sm *SSEManager) keepConnectionAlive(conn *SSEConnection) {
-	ticker := time.NewTicker(30 * time.Second) // 30秒心跳
+	ticker := time.NewTicker(10 * time.Second) // 改为10秒心跳，提高频率
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-conn.CloseChan:
-			log.Printf("SSE连接已关闭: sessionId=%s", conn.SessionID)
+			gologger.Infof("SSE连接已关闭: sessionId=%s", conn.SessionID)
 			return
 		case <-ticker.C:
-			// 发送心跳
+			// 发送liveStatus心跳消息
 			heartbeat := TaskEventMessage{
 				ID:        fmt.Sprintf("heartbeat_%d", time.Now().Unix()),
-				Type:      "heartbeat",
+				Type:      "liveStatus", // 改为liveStatus类型
 				SessionID: conn.SessionID,
 				Timestamp: time.Now().Unix(),
-				Event: map[string]interface{}{
-					"timestamp": time.Now().Unix(),
+				Event: LiveStatusEvent{
+					ID:        fmt.Sprintf("heartbeat_%d", time.Now().Unix()),
+					Type:      "liveStatus",
+					Timestamp: time.Now().UnixMilli(),
+					Text:      "思考中...", // 默认状态文本
 				},
 			}
 
 			eventData, err := json.Marshal(heartbeat)
 			if err != nil {
-				log.Printf("心跳序列化失败: %v", err)
+				gologger.Errorf("心跳序列化失败: %v", err)
 				continue
 			}
 
 			_, err = fmt.Fprintf(conn.Writer, "data: %s\n\n", eventData)
 			if err != nil {
-				log.Printf("发送心跳失败: %v", err)
+				gologger.Errorf("发送心跳失败: %v", err)
 				sm.RemoveConnection(conn.SessionID)
 				return
 			}
@@ -133,7 +135,7 @@ func (sm *SSEManager) RemoveConnection(sessionID string) {
 	if conn, exists := sm.connections[sessionID]; exists {
 		close(conn.CloseChan)
 		delete(sm.connections, sessionID)
-		log.Printf("移除SSE连接: sessionId=%s", sessionID)
+		gologger.Infof("移除SSE连接: sessionId=%s", sessionID)
 	}
 }
 
