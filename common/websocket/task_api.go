@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"git.code.oa.com/trpc-go/trpc-go/log"
 	"github.com/gin-gonic/gin"
 )
 
@@ -130,6 +131,7 @@ func HandleTaskSSE(c *gin.Context, tm *TaskManager) {
 	// 建立SSE连接
 	err = tm.EstablishSSEConnection(c.Writer, sessionId, username)
 	if err != nil {
+		log.Errorf("建立SSE连接失败: sessionId=%s, username=%s, error=%v", sessionId, username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  1,
 			"message": "建立SSE连接失败: " + err.Error(),
@@ -138,11 +140,14 @@ func HandleTaskSSE(c *gin.Context, tm *TaskManager) {
 		return
 	}
 
+	log.Infof("SSE连接建立成功: sessionId=%s, username=%s", sessionId, username)
+
 	// 保持连接活跃，等待客户端断开
 	<-c.Request.Context().Done()
 
 	// 客户端断开连接时，清理SSE连接
 	tm.CloseSSESession(sessionId)
+	log.Infof("SSE连接已断开: sessionId=%s", sessionId)
 }
 
 // 新建任务接口
@@ -173,9 +178,12 @@ func HandleTaskCreate(c *gin.Context, tm *TaskManager) {
 	// 设置用户名到请求中
 	req.Username = username
 
+	log.Infof("开始创建任务: sessionId=%s, username=%s, taskType=%s", req.SessionID, username, req.Task)
+
 	// 调用TaskManager
 	err := tm.AddTask(&req)
 	if err != nil {
+		log.Errorf("任务创建失败: sessionId=%s, username=%s, error=%v", req.SessionID, username, err)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
 			"message": "任务创建失败: " + err.Error(),
@@ -183,6 +191,8 @@ func HandleTaskCreate(c *gin.Context, tm *TaskManager) {
 		})
 		return
 	}
+
+	log.Infof("任务创建成功: sessionId=%s, username=%s", req.SessionID, username)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
@@ -218,9 +228,12 @@ func HandleTerminateTask(c *gin.Context, tm *TaskManager) {
 	// 从中间件获取用户名
 	username := c.GetString("username")
 
+	log.Infof("用户请求终止任务: sessionId=%s, username=%s", sessionId, username)
+
 	// 调用TaskManager（包含权限验证）
 	err := tm.TerminateTask(sessionId, username)
 	if err != nil {
+		log.Errorf("任务终止失败: sessionId=%s, username=%s, error=%v", sessionId, username, err)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
 			"message": "任务终止失败: " + err.Error(),
@@ -228,6 +241,8 @@ func HandleTerminateTask(c *gin.Context, tm *TaskManager) {
 		})
 		return
 	}
+
+	log.Infof("任务终止成功: sessionId=%s, username=%s", sessionId, username)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
@@ -365,9 +380,13 @@ func HandleUploadFile(c *gin.Context, tm *TaskManager) {
 		return
 	}
 
+	username := c.GetString("username")
+	log.Infof("开始文件上传: filename=%s, size=%d, username=%s", file.Filename, file.Size, username)
+
 	// 执行文件上传
 	uploadResult, err := tm.UploadFile(file)
 	if err != nil {
+		log.Errorf("文件上传失败: filename=%s, username=%s, error=%v", file.Filename, username, err)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
 			"message": "文件上传失败: " + err.Error(),
@@ -375,6 +394,8 @@ func HandleUploadFile(c *gin.Context, tm *TaskManager) {
 		})
 		return
 	}
+
+	log.Infof("文件上传成功: filename=%s, fileUrl=%s, username=%s", file.Filename, uploadResult.FileURL, username)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,

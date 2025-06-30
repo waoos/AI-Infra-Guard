@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"git.code.oa.com/trpc-go/trpc-go/log"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
@@ -60,6 +61,8 @@ func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, f
 
 // 添加任务
 func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
+	log.Infof("开始添加任务: sessionId=%s, taskType=%s, username=%s", req.SessionID, req.Task, req.Username)
+
 	// 先存储任务到内存（dispatchTask需要从内存中获取任务）
 	tm.mu.Lock()
 	tm.tasks[req.SessionID] = req
@@ -72,6 +75,8 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 		tm.mu.Lock()
 		delete(tm.tasks, req.SessionID)
 		tm.mu.Unlock()
+		log.Errorf("任务分发失败: sessionId=%s, error=%v", req.SessionID, err)
+		gologger.Errorf("任务分发失败: %v", err)
 		return fmt.Errorf("任务分发失败: %v", err)
 	}
 
@@ -95,9 +100,13 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 		tm.mu.Lock()
 		delete(tm.tasks, req.SessionID)
 		tm.mu.Unlock()
+		log.Errorf("创建会话记录失败: sessionId=%s, error=%v", req.SessionID, err)
+		gologger.Errorf("创建会话记录失败: %v", err)
 		return fmt.Errorf("创建会话记录失败: %v", err)
 	}
 
+	log.Infof("任务添加成功: sessionId=%s, taskType=%s", req.SessionID, req.Task)
+	gologger.Infof("任务添加成功: sessionId=%s, taskType=%s", req.SessionID, req.Task)
 	return nil
 }
 
@@ -111,9 +120,12 @@ func (tm *TaskManager) GetTask(sessionId string) (*TaskCreateRequest, bool) {
 
 // 新增：任务分发方法
 func (tm *TaskManager) dispatchTask(sessionId string) error {
+	log.Infof("开始分发任务: sessionId=%s", sessionId)
+
 	// 1. 获取任务
 	task, exists := tm.GetTask(sessionId)
 	if !exists {
+		log.Errorf("任务不存在: sessionId=%s", sessionId)
 		gologger.Errorf("Task not found for sessionId: %s", sessionId)
 		return fmt.Errorf("任务不存在")
 	}
@@ -121,25 +133,31 @@ func (tm *TaskManager) dispatchTask(sessionId string) error {
 	// 2. 获取可用 Agent
 	availableAgents := tm.agentManager.GetAvailableAgents()
 	if len(availableAgents) == 0 {
+		log.Warnf("没有可用的Agent: sessionId=%s", sessionId)
 		gologger.Info("No available agents")
 		return fmt.Errorf("没有可用的Agent")
 	}
+
+	log.Infof("找到可用Agent数量: sessionId=%s, count=%d", sessionId, len(availableAgents))
 
 	// 3. 选择 Agent（简单策略）
 	selectedAgent := availableAgents[0]
 
 	// 4. 检查连接健康状态
 	if !selectedAgent.IsConnectionHealthy() {
+		log.Warnf("首选Agent连接不健康，尝试其他Agent: sessionId=%s, agentId=%s", sessionId, selectedAgent.agentID)
 		// 如果连接不健康，尝试其他 Agent
 		for _, agent := range availableAgents[1:] {
 			if agent.IsConnectionHealthy() {
 				selectedAgent = agent
+				log.Infof("选择备用Agent: sessionId=%s, agentId=%s", sessionId, selectedAgent.agentID)
 				break
 			}
 		}
 
 		// 如果所有 Agent 都不健康，记录错误并返回
 		if !selectedAgent.IsConnectionHealthy() {
+			log.Errorf("所有agent连接都异常: sessionId=%s", sessionId)
 			gologger.Errorf("所有agent连接都异常 for sessionId: %s", sessionId)
 			return fmt.Errorf("所有agent连接都异常")
 		}
@@ -148,6 +166,7 @@ func (tm *TaskManager) dispatchTask(sessionId string) error {
 	// 5. 更新session的assigned_agent和开始时间
 	err := tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, selectedAgent.agentID)
 	if err != nil {
+		log.Errorf("无法更新session的assigned_agent: sessionId=%s, agentId=%s, error=%v", task.SessionID, selectedAgent.agentID, err)
 		gologger.Errorf("无法更新session的assigned_agent: %v", err)
 		return fmt.Errorf("无法更新session的assigned_agent")
 	}
@@ -168,18 +187,21 @@ func (tm *TaskManager) dispatchTask(sessionId string) error {
 	// 7. 使用重试机制发送给 Agent（设置较短的超时时间）
 	err = selectedAgent.SendMessageWithRetry(taskMsg, 1) // 只重试1次，减少等待时间
 	if err != nil {
+		log.Errorf("下发任务给Agent失败: sessionId=%s, agentId=%s, error=%v", task.SessionID, selectedAgent.agentID, err)
 		gologger.Errorf("下发任务给 %s 失败: %v", selectedAgent.agentID, err)
 		// 如果发送失败，重置assigned_agent
 		tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, "")
 		return fmt.Errorf("下发任务给 %s 失败: %v", selectedAgent.agentID, err)
 	}
 
+	log.Infof("任务分发成功: sessionId=%s, agentId=%s", task.SessionID, selectedAgent.agentID)
 	gologger.Infof("任务下发成功: sessionId=%s, agentId=%s", task.SessionID, selectedAgent.agentID)
 	return nil
 }
 
 // HandleAgentEvent 处理来自Agent的事件
 func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, event interface{}) {
+	log.Debugf("收到Agent事件: sessionId=%s, eventType=%s", sessionId, eventType)
 	gologger.Debugf("收到Agent事件: sessionId=%s, eventType=%s", sessionId, eventType)
 
 	// 使用通用事件处理函数
@@ -190,57 +212,67 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 	case "liveStatus":
 		if convertedEvent, err := convertToStruct(event, &LiveStatusEvent{}); err == nil {
 			if liveStatusEvent, ok := convertedEvent.(*LiveStatusEvent); ok {
+				log.Debugf("liveStatus事件详情: sessionId=%s, text=%s", sessionId, liveStatusEvent.Text)
 				gologger.Debugf("liveStatus事件详情: sessionId=%s, text=%s", sessionId, liveStatusEvent.Text)
 			}
 		}
 	case "planUpdate":
 		if convertedEvent, err := convertToStruct(event, &PlanUpdateEvent{}); err == nil {
 			if planUpdateEvent, ok := convertedEvent.(*PlanUpdateEvent); ok {
+				log.Infof("收到计划更新: sessionId=%s, tasks=%d", sessionId, len(planUpdateEvent.Tasks))
 				gologger.Debugf("planUpdate事件详情: sessionId=%s, tasks=%d", sessionId, len(planUpdateEvent.Tasks))
 			}
 		}
 	case "newPlanStep":
 		if convertedEvent, err := convertToStruct(event, &NewPlanStepEvent{}); err == nil {
 			if newPlanStepEvent, ok := convertedEvent.(*NewPlanStepEvent); ok {
+				log.Infof("新计划步骤: sessionId=%s, stepId=%s", sessionId, newPlanStepEvent.StepID)
 				gologger.Debugf("newPlanStep事件详情: sessionId=%s, stepId=%s", sessionId, newPlanStepEvent.StepID)
 			}
 		}
 	case "statusUpdate":
 		if convertedEvent, err := convertToStruct(event, &StatusUpdateEvent{}); err == nil {
 			if statusUpdateEvent, ok := convertedEvent.(*StatusUpdateEvent); ok {
+				log.Infof("状态更新: sessionId=%s, status=%s", sessionId, statusUpdateEvent.AgentStatus)
 				gologger.Debugf("statusUpdate事件详情: sessionId=%s, status=%s", sessionId, statusUpdateEvent.AgentStatus)
 			}
 		}
 	case "toolUsed":
 		if convertedEvent, err := convertToStruct(event, &ToolUsedEvent{}); err == nil {
 			if toolUsedEvent, ok := convertedEvent.(*ToolUsedEvent); ok {
+				log.Infof("工具使用: sessionId=%s, tools=%d", sessionId, len(toolUsedEvent.Tools))
 				gologger.Debugf("toolUsed事件详情: sessionId=%s, tools=%d", sessionId, len(toolUsedEvent.Tools))
 			}
 		}
 	case "actionLog":
 		if convertedEvent, err := convertToStruct(event, &ActionLogEvent{}); err == nil {
 			if actionLogEvent, ok := convertedEvent.(*ActionLogEvent); ok {
+				log.Debugf("动作日志: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
 				gologger.Debugf("actionLog事件详情: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
 			}
 		}
 	case "resultUpdate":
 		if convertedEvent, err := convertToStruct(event, &ResultUpdateEvent{}); err == nil {
 			if resultUpdateEvent, ok := convertedEvent.(*ResultUpdateEvent); ok {
+				log.Infof("任务完成: sessionId=%s, fileName=%s", sessionId, resultUpdateEvent.Result.FileName)
 				gologger.Debugf("resultUpdate事件详情: sessionId=%s, fileName=%s",
 					sessionId, resultUpdateEvent.Result.FileName)
 
 				// 更新任务状态为已完成
 				err := tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusDone)
 				if err != nil {
+					log.Errorf("更新任务状态为已完成失败: sessionId=%s, error=%v", sessionId, err)
 					gologger.Errorf("更新任务状态为已完成失败: %v", err)
 				} else {
+					log.Infof("任务状态已更新为已完成: sessionId=%s", sessionId)
 					gologger.Infof("任务状态已更新为已完成: sessionId=%s", sessionId)
 				}
 				// 任务完成，可以清理资源
-				tm.cleanupTask(sessionId)
+				go tm.cleanupTask(sessionId)
 			}
 		}
 	default:
+		log.Warnf("未知的事件类型: sessionId=%s, eventType=%s", sessionId, eventType)
 		gologger.Warnf("未知的事件类型: %s", eventType)
 	}
 }
@@ -293,23 +325,27 @@ func (tm *TaskManager) handleEvent(sessionId string, eventType string, event int
 	// 存储事件到数据库
 	err := tm.taskStore.StoreEvent(id, sessionId, eventType, event, timestamp)
 	if err != nil {
+		log.Errorf("存储事件失败: sessionId=%s, eventType=%s, error=%v", sessionId, eventType, err)
 		gologger.Errorf("存储%s事件失败: %v", eventType, err)
 		return
 	}
 
-	// 推送给前端 SSE（先检查连接是否存在）
+	// 推送事件到SSE
 	err = tm.sseManager.SendEvent(id, sessionId, eventType, event)
 	if err != nil {
 		// 如果是连接不存在的错误，记录为调试信息而不是错误
 		if strings.Contains(err.Error(), "连接不存在") {
+			log.Debugf("SSE连接已关闭，跳过事件推送: sessionId=%s, eventType=%s", sessionId, eventType)
 			gologger.Debugf("SSE连接已关闭，跳过事件推送: sessionId=%s, eventType=%s", sessionId, eventType)
 		} else {
+			log.Errorf("推送事件到SSE失败: sessionId=%s, eventType=%s, error=%v", sessionId, eventType, err)
 			gologger.Errorf("推送%s事件到SSE失败: %v", eventType, err)
 		}
 		return
 	}
 
 	// 记录日志
+	log.Debugf("事件处理完成: sessionId=%s, eventType=%s", sessionId, eventType)
 	gologger.Debugf("%s事件已处理: sessionId=%s", eventType, sessionId)
 }
 
@@ -335,34 +371,41 @@ func getEventTimestamp(event interface{}) int64 {
 
 // TerminateTask 终止任务
 func (tm *TaskManager) TerminateTask(sessionId string, username string) error {
+	log.Infof("开始终止任务: sessionId=%s, username=%s", sessionId, username)
+
 	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
+		log.Errorf("任务不存在: sessionId=%s, username=%s", sessionId, username)
 		return fmt.Errorf("任务不存在")
 	}
 
 	// 验证用户权限（只有任务创建者才能终止任务）
 	if session.Username != username {
+		log.Errorf("无权限终止任务: sessionId=%s, username=%s, owner=%s", sessionId, username, session.Username)
 		return fmt.Errorf("无权限操作此任务")
 	}
 
 	// 通知 Agent 终止任务
 	if session.AssignedAgent != "" {
+		log.Infof("通知Agent终止任务: sessionId=%s, agentId=%s", sessionId, session.AssignedAgent)
 		tm.notifyAgentToTerminate(session.AssignedAgent, sessionId)
-	}
-
-	// 更新任务状态
-	err = tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusTerminated)
-	if err != nil {
-		return fmt.Errorf("更新任务状态失败")
 	}
 
 	// 发送终止事件给前端
 	tm.sendTerminationEvent(sessionId)
 
-	// 任务终止，清理资源
+	// 更新任务状态为已终止
+	err = tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusTerminated)
+	if err != nil {
+		log.Errorf("更新任务状态失败: sessionId=%s, error=%v", sessionId, err)
+		return fmt.Errorf("更新任务状态失败")
+	}
+
+	// 异步清理任务资源
 	go tm.cleanupTask(sessionId)
 
+	log.Infof("任务终止完成: sessionId=%s", sessionId)
 	return nil
 }
 
@@ -507,9 +550,11 @@ func (tm *TaskManager) deleteSessionAttachments(session *database.Session) error
 		// 删除文件
 		if err := os.Remove(filePath); err != nil {
 			if !os.IsNotExist(err) {
+				log.Errorf("删除附件文件失败: %s, error: %v", filePath, err)
 				gologger.Warnf("删除附件文件失败: %s, error: %v", filePath, err)
 			}
 		} else {
+			log.Debugf("删除附件文件成功: %s", filePath)
 			gologger.Debugf("删除附件文件成功: %s", filePath)
 		}
 	}
@@ -525,15 +570,19 @@ type UploadFileResult struct {
 
 // UploadFile 上传文件
 func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (*UploadFileResult, error) {
+	log.Infof("开始文件上传: originalName=%s, size=%d", file.Filename, file.Size)
+
 	// 保存原始文件名
 	originalName := file.Filename
 
 	// 生成安全的唯一文件名
 	fileName := generateSecureFileName(file.Filename)
+	log.Debugf("生成安全文件名: originalName=%s, secureName=%s", originalName, fileName)
 
 	// 使用配置的上传目录
 	uploadDir := tm.fileConfig.UploadDir
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		log.Errorf("创建上传目录失败: path=%s, error=%v", uploadDir, err)
 		return nil, fmt.Errorf("创建上传目录失败: %v", err)
 	}
 
@@ -543,12 +592,14 @@ func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (*UploadFileResult
 	// 保存文件到本地
 	src, err := file.Open()
 	if err != nil {
+		log.Errorf("打开上传文件失败: originalName=%s, error=%v", originalName, err)
 		return nil, fmt.Errorf("打开文件失败: %v", err)
 	}
 	defer src.Close()
 
 	dst, err := os.Create(filePath)
 	if err != nil {
+		log.Errorf("创建目标文件失败: filePath=%s, error=%v", filePath, err)
 		return nil, fmt.Errorf("创建文件失败: %v", err)
 	}
 	defer dst.Close()
@@ -558,17 +609,21 @@ func (tm *TaskManager) UploadFile(file *multipart.FileHeader) (*UploadFileResult
 	if err != nil {
 		// 清理已创建的文件
 		os.Remove(filePath)
+		log.Errorf("文件写入失败: filePath=%s, error=%v", filePath, err)
 		return nil, fmt.Errorf("保存文件失败: %v", err)
 	}
 
 	// 验证写入的文件大小
 	if written != file.Size {
 		os.Remove(filePath)
+		log.Errorf("文件写入不完整: expected=%d, actual=%d, filePath=%s", file.Size, written, filePath)
 		return nil, fmt.Errorf("文件写入不完整")
 	}
 
 	// 生成文件访问URL
 	fileURL := tm.fileConfig.GetFileURL(fileName)
+
+	log.Infof("文件上传成功: originalName=%s, secureName=%s, size=%d, fileURL=%s", originalName, fileName, written, fileURL)
 
 	return &UploadFileResult{
 		OriginalName: originalName,
@@ -635,6 +690,8 @@ func (tm *TaskManager) CloseSSESession(sessionId string) {
 
 // 任务完成/中断时的清理
 func (tm *TaskManager) cleanupTask(sessionId string) {
+	log.Infof("开始清理任务资源: sessionId=%s", sessionId)
+
 	// 清理内存中的任务数据
 	tm.mu.Lock()
 	delete(tm.tasks, sessionId)
@@ -643,6 +700,7 @@ func (tm *TaskManager) cleanupTask(sessionId string) {
 	// 注意：SSE连接已在resultUpdate事件处理中立即清理
 	tm.CloseSSESession(sessionId)
 
+	log.Infof("任务清理完成: sessionId=%s", sessionId)
 	gologger.Infof("任务清理完成: sessionId=%s", sessionId)
 }
 
@@ -740,24 +798,30 @@ func (tm *TaskManager) extractFileNameFromURL(url string) string {
 
 // DownloadFile 下载文件
 func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username string, c *gin.Context) error {
+	log.Infof("开始文件下载: sessionId=%s, fileUrl=%s, username=%s", sessionId, fileUrl, username)
+
 	// 1. 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
+		log.Errorf("任务不存在: sessionId=%s, error=%v", sessionId, err)
 		return fmt.Errorf("任务不存在")
 	}
 
 	// 2. 验证用户权限（只有任务创建者才能下载文件）
 	if session.Username != username {
+		log.Warnf("用户权限验证失败: sessionId=%s, requestUser=%s, owner=%s", sessionId, username, session.Username)
 		return fmt.Errorf("无权限访问此任务")
 	}
 
 	// 3. 验证文件URL是否属于该任务
 	if session.Attachments == nil {
+		log.Errorf("任务无附件: sessionId=%s", sessionId)
 		return fmt.Errorf("文件不存在于此任务中")
 	}
 
 	var attachmentURLs []string
 	if err := json.Unmarshal(session.Attachments, &attachmentURLs); err != nil {
+		log.Errorf("解析任务附件失败: sessionId=%s, error=%v", sessionId, err)
 		return fmt.Errorf("解析任务附件失败")
 	}
 
@@ -771,6 +835,7 @@ func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username s
 	}
 
 	if !fileExists {
+		log.Warnf("文件不在任务附件列表中: sessionId=%s, fileUrl=%s", sessionId, fileUrl)
 		return fmt.Errorf("文件不存在于此任务中")
 	}
 
@@ -797,20 +862,26 @@ func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username s
 
 	filePath := filepath.Join(tm.fileConfig.UploadDir, localFileName)
 
+	log.Debugf("文件下载路径信息: fileUrl=%s, fileName=%s, localFileName=%s, filePath=%s",
+		fileUrl, fileName, localFileName, filePath)
 	// 添加调试日志
 	gologger.Debugf("文件下载调试信息: fileUrl=%s, localFileName=%s, filePath=%s, uploadDir=%s",
 		fileUrl, localFileName, filePath, tm.fileConfig.UploadDir)
 
 	// 6. 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		log.Errorf("本地文件不存在: filePath=%s", filePath)
 		return fmt.Errorf("文件不存在")
 	}
 
 	// 7. 获取文件信息
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
+		log.Errorf("获取文件信息失败: filePath=%s, error=%v", filePath, err)
 		return fmt.Errorf("获取文件信息失败: %v", err)
 	}
+
+	log.Debugf("文件信息获取成功: filePath=%s, size=%d", filePath, fileInfo.Size())
 
 	// 8. 设置响应头
 	// 获取文件的MIME类型
@@ -834,16 +905,20 @@ func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username s
 	// 9. 打开文件并流式传输
 	file, err := os.Open(filePath)
 	if err != nil {
+		log.Errorf("打开文件失败: filePath=%s, error=%v", filePath, err)
 		return fmt.Errorf("打开文件失败: %v", err)
 	}
 	defer file.Close()
 
 	// 10. 流式传输文件内容
-	_, err = io.Copy(c.Writer, file)
+	written, err := io.Copy(c.Writer, file)
 	if err != nil {
+		log.Errorf("文件传输失败: filePath=%s, error=%v", filePath, err)
 		return fmt.Errorf("传输文件失败: %v", err)
 	}
 
+	log.Infof("文件下载成功: sessionId=%s, fileName=%s, fileSize=%d, transmittedSize=%d",
+		sessionId, fileName, fileInfo.Size(), written)
 	gologger.Infof("文件下载成功: sessionId=%s, fileName=%s, fileSize=%d", sessionId, fileName, fileInfo.Size())
 	return nil
 }

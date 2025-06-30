@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"git.code.oa.com/trpc-go/trpc-go/log"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -149,11 +150,13 @@ func (am *AgentManager) HandleAgentWebSocket() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
+			log.Errorf("WebSocket升级失败: error=%v", err)
 			return
 		}
 
 		// ac := NewAgentConnection(conn, am.store)
 		ac := NewAgentConnection(conn)
+		log.Infof("新的Agent连接建立: remoteAddr=%s", conn.RemoteAddr().String())
 		go ac.handleConnection(am)
 	}
 }
@@ -162,6 +165,7 @@ func (am *AgentManager) HandleAgentWebSocket() gin.HandlerFunc {
 func (ac *AgentConnection) handleConnection(am *AgentManager) {
 	defer func() {
 		ac.cleanup(am)
+		log.Infof("Agent连接已断开: agentId=%s, remoteAddr=%s", ac.agentID, ac.conn.RemoteAddr().String())
 	}()
 
 	// 设置连接参数
@@ -179,11 +183,15 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 	for {
 		_, message, err := ac.conn.ReadMessage()
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Errorf("Agent连接异常断开: agentId=%s, error=%v", ac.agentID, err)
+			}
 			break
 		}
 
 		var wsMsg WSMessage
 		if err := json.Unmarshal(message, &wsMsg); err != nil {
+			log.Errorf("Agent消息解析失败: agentId=%s, error=%v", ac.agentID, err)
 			// 发送错误响应但不断开连接
 			ac.sendError("消息格式错误请检查JSON格式")
 			continue
@@ -191,6 +199,7 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 
 		// 验证消息类型
 		if wsMsg.Type == "" {
+			log.Errorf("Agent消息类型为空: agentId=%s", ac.agentID)
 			ac.sendError("消息类型不能为空")
 			continue
 		}
@@ -212,6 +221,7 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 			// 所有事件类型都统一处理
 			ac.handleAgentEvent(am, wsMsg.Content, wsMsg.Type)
 		default:
+			log.Warnf("Agent发送未知消息类型: agentId=%s, type=%s", ac.agentID, wsMsg.Type)
 			ac.sendError(fmt.Sprintf("未知的消息类型: %s。支持的类型: register, disconnect, liveStatus, planUpdate, newPlanStep, statusUpdate, toolUsed, resultUpdate, actionLog", wsMsg.Type))
 		}
 	}
@@ -220,41 +230,49 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 // handleRegister 处理注册消息
 func (ac *AgentConnection) handleRegister(am *AgentManager, content interface{}) {
 	contentBytes, _ := json.Marshal(content)
-	var reg AgentRegisterContent
-	if err := json.Unmarshal(contentBytes, &reg); err != nil {
+	var rc AgentRegisterContent
+	if err := json.Unmarshal(contentBytes, &rc); err != nil {
+		log.Errorf("Agent注册消息解析失败: error=%v", err)
 		ac.sendError("注册消息格式错误")
 		return
 	}
 
 	// 使用validator验证结构体
-	if err := validate.Struct(reg); err != nil {
+	if err := validate.Struct(rc); err != nil {
 		errorMsg := formatValidationErrors(err)
+		log.Errorf("Agent注册验证失败: agentId=%s, error=%s", rc.AgentID, errorMsg)
 		ac.sendError(errorMsg)
 		return
 	}
 
-	// 检查是否已存在同ID的连接
+	// 检查是否已存在相同ID的Agent
 	am.mu.Lock()
-	if existingConn, exists := am.connections[reg.AgentID]; exists {
-		// 关闭旧连接
+	if existingConn, exists := am.connections[rc.AgentID]; exists {
+		am.mu.Unlock()
+		log.Warnf("Agent ID已存在，断开旧连接: agentId=%s", rc.AgentID)
+		// 断开旧连接
 		existingConn.stateMu.Lock()
 		existingConn.isActive = false
 		existingConn.stateMu.Unlock()
 		existingConn.conn.Close()
-		delete(am.connections, reg.AgentID)
+	} else {
+		am.mu.Unlock()
 	}
+
+	// 注册新连接
+	am.mu.Lock()
+	am.connections[rc.AgentID] = ac
 	am.mu.Unlock()
 
-	// 设置连接状态
+	// 更新连接状态
 	ac.stateMu.Lock()
-	ac.agentID = reg.AgentID
-	ac.currentTaskID = "" // 重置当前任务ID
+	ac.agentID = rc.AgentID
+	ac.isActive = true
 	ac.stateMu.Unlock()
 
-	am.mu.Lock()
-	am.connections[reg.AgentID] = ac
-	am.mu.Unlock()
+	log.Infof("Agent注册成功: agentId=%s, hostname=%s, ip=%s, version=%s", rc.AgentID, rc.Hostname, rc.IP, rc.Version)
 
+	// 发送注册成功响应
 	response := WSMessage{
 		Type: "register_ack",
 		Content: Response{
@@ -405,12 +423,14 @@ func (ac *AgentConnection) sendError(message string) {
 func (ac *AgentConnection) handleAgentEvent(am *AgentManager, content interface{}, eventType string) {
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
+		log.Errorf("Agent事件序列化失败: agentId=%s, eventType=%s, error=%v", ac.agentID, eventType, err)
 		ac.sendError(fmt.Sprintf("%s事件序列化失败: %v", eventType, err))
 		return
 	}
 
 	var eventMessage TaskEventMessage
 	if err := json.Unmarshal(contentBytes, &eventMessage); err != nil {
+		log.Errorf("Agent事件格式错误: agentId=%s, eventType=%s, error=%v", ac.agentID, eventType, err)
 		ac.sendError(fmt.Sprintf("%s事件格式错误: %v", eventType, err))
 		return
 	}
@@ -418,6 +438,7 @@ func (ac *AgentConnection) handleAgentEvent(am *AgentManager, content interface{
 	// 使用validator验证TaskEventMessage
 	if err := validate.Struct(eventMessage); err != nil {
 		errorMsg := formatValidationErrors(err)
+		log.Errorf("Agent事件验证失败: agentId=%s, eventType=%s, error=%s", ac.agentID, eventType, errorMsg)
 		ac.sendError(fmt.Sprintf("%s事件验证失败: %s", eventType, errorMsg))
 		return
 	}
@@ -426,10 +447,14 @@ func (ac *AgentConnection) handleAgentEvent(am *AgentManager, content interface{
 	sessionId := eventMessage.SessionID
 	event := eventMessage.Event
 
+	log.Debugf("收到Agent事件: agentId=%s, sessionId=%s, eventType=%s", ac.agentID, sessionId, eventType)
+
 	// 转发给 TaskManager 处理
 	am.mu.RLock()
 	if am.taskManager != nil {
 		am.taskManager.HandleAgentEvent(sessionId, eventType, event)
+	} else {
+		log.Errorf("TaskManager未初始化，无法处理Agent事件: agentId=%s, sessionId=%s", ac.agentID, sessionId)
 	}
 	am.mu.RUnlock()
 }

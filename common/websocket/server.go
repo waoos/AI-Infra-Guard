@@ -5,30 +5,45 @@ import (
 	"mime"
 	"path/filepath"
 
+	"git.code.oa.com/trpc-go/trpc-go/log"
+	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
+	"github.com/Tencent/AI-Infra-Guard/common/middleware"
+	"github.com/Tencent/AI-Infra-Guard/common/trpc"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/internal/options"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
-	// IOA插件导入（需要配置内部模块依赖）
-	// _ "git.code.oa.com/trpc-go/trpc-filter/ioa"
+	// _ "git.code.oa.com/trpc-go/trpc-filter/metrics"
+	// _ "git.code.oa.com/trpc-go/trpc-filter/tracing"
 )
 
 //go:embed static/*
 var staticFS embed.FS
 
 func RunWebServer(options *options.Options) {
+	// 1. 初始化trpc-go
+	if err := trpc.InitTrpc("./trpc_go.yaml"); err != nil {
+		gologger.Fatalf("Trpc-go初始化失败: %v", err)
+	}
+	log.Info("Trpc-go initialized successfully")
+
 	r := gin.Default()
 	wsServer := NewWSServer(options)
 
-	// 1. 初始化数据库和AgentStore
+	// 2. 添加trpc中间件到所有路由
+	r.Use(middleware.TrpcMiddleware())
+
+	// 1. 初始化数据库和Agentmanager
 	dbConfig := database.NewConfig("db/tasks.db") // 推荐单独目录
 	db, err := database.InitDB(dbConfig)
 	if err != nil {
+		log.Errorf("数据库初始化失败: %v", err)
 		gologger.Fatalf("数据库初始化失败: %v", err)
 	}
 	taskStore := database.NewTaskStore(db)
 	if err := taskStore.Init(); err != nil {
-		gologger.Fatalf("初始化agent表失败: %v", err)
+		log.Errorf("初始化tasks表失败: %v", err)
+		gologger.Fatalf("初始化tasks表失败: %v", err)
 	}
 
 	// 初始化AgentManager
@@ -39,6 +54,7 @@ func RunWebServer(options *options.Options) {
 
 	// 验证文件上传配置
 	if err := fileConfig.ValidateConfig(); err != nil {
+		log.Errorf("文件上传配置验证失败: %v", err)
 		gologger.Fatalf("文件上传配置验证失败: %v", err)
 	}
 
@@ -195,8 +211,10 @@ func RunWebServer(options *options.Options) {
 	// }
 
 	// 启动服务器
+	log.Infof("Starting WebServer on http://%s", options.WebServerAddr)
 	gologger.Infof("Starting WebServer on http://%s\n", options.WebServerAddr)
 	if err := r.Run(options.WebServerAddr); err != nil {
+		log.Errorf("Could not start WebSocket server: %s", err)
 		gologger.Fatalf("Could not start WebSocket server: %s\n", err)
 	}
 }
