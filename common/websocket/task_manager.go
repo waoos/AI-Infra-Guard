@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"git.code.oa.com/trpc-go/trpc-go/log"
+	"github.com/Tencent/AI-Infra-Guard/common/monitoring"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,9 @@ func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, f
 func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 	log.Infof("开始添加任务: sessionId=%s, taskType=%s, username=%s", req.SessionID, req.Task, req.Username)
 
+	// 开始任务监控（记录开始时间）
+	monitoring.StartTaskMonitoring(req.SessionID)
+
 	// 先存储任务到内存（dispatchTask需要从内存中获取任务）
 	tm.mu.Lock()
 	tm.tasks[req.SessionID] = req
@@ -77,6 +81,10 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 		tm.mu.Unlock()
 		log.Errorf("任务分发失败: sessionId=%s, error=%v", req.SessionID, err)
 		gologger.Errorf("任务分发失败: %v", err)
+
+		// 上报任务创建失败监控
+		monitoring.EndTaskCreationMonitoring(req.Task, "failed", req.SessionID)
+
 		return fmt.Errorf("任务分发失败: %v", err)
 	}
 
@@ -102,11 +110,19 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest) error {
 		tm.mu.Unlock()
 		log.Errorf("创建会话记录失败: sessionId=%s, error=%v", req.SessionID, err)
 		gologger.Errorf("创建会话记录失败: %v", err)
+
+		// 上报任务创建失败监控
+		monitoring.EndTaskCreationMonitoring(req.Task, "failed", req.SessionID)
+
 		return fmt.Errorf("创建会话记录失败: %v", err)
 	}
 
 	log.Infof("任务添加成功: sessionId=%s, taskType=%s", req.SessionID, req.Task)
 	gologger.Infof("任务添加成功: sessionId=%s, taskType=%s", req.SessionID, req.Task)
+
+	// 上报任务创建成功监控
+	monitoring.EndTaskCreationMonitoring(req.Task, "created", req.SessionID)
+
 	return nil
 }
 
@@ -258,6 +274,13 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 				gologger.Debugf("resultUpdate事件详情: sessionId=%s, fileName=%s",
 					sessionId, resultUpdateEvent.Result.FileName)
 
+				// 获取任务信息用于监控
+				task, exists := tm.GetTask(sessionId)
+				if exists {
+					// 上报任务完成监控
+					monitoring.EndTaskMonitoring(task.Task, "completed", sessionId)
+				}
+
 				// 更新任务状态为已完成
 				err := tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusDone)
 				if err != nil {
@@ -401,6 +424,9 @@ func (tm *TaskManager) TerminateTask(sessionId string, username string) error {
 		log.Errorf("更新任务状态失败: sessionId=%s, error=%v", sessionId, err)
 		return fmt.Errorf("更新任务状态失败")
 	}
+
+	// 上报任务终止监控
+	monitoring.EndTaskMonitoring(session.TaskType, "terminated", sessionId)
 
 	// 异步清理任务资源
 	go tm.cleanupTask(sessionId)
