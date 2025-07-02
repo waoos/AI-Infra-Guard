@@ -1,8 +1,12 @@
 package middleware
 
 import (
+	"time"
+
 	"git.code.oa.com/trpc-go/trpc-go"
 	"git.code.oa.com/trpc-go/trpc-go/codec"
+	"git.code.oa.com/trpc-go/trpc-go/log"
+	"github.com/Tencent/AI-Infra-Guard/common/monitoring"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,13 +24,55 @@ func TrpcMiddleware() gin.HandlerFunc {
 		msg.WithCalleeServer(trpc.GlobalConfig().Server.Server)
 		msg.WithCalleeService("")
 		msg.WithCalleeServiceName("")
-		msg.WithCalleeMethod(":" + c.FullPath()) // 避免天机阁 CleanRPCMethod 在请求方法名前加:
+		msg.WithCalleeMethod(":" + c.FullPath())
 		msg.WithCalleeContainerName(trpc.GlobalConfig().Global.ContainerName)
 
 		// 通过request context传递span、trpc信息
 		c.Request = c.Request.WithContext(ctx)
 
+		// 记录请求开始时间
+		startTime := time.Now()
+
 		// 继续处理请求
 		c.Next()
+
+		// 计算请求耗时
+		duration := time.Since(startTime)
+
+		// 获取客户端IP
+		clientIP := getClientIP(c)
+
+		// 上报HTTP监控数据到智研
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Errorf("监控函数panic: %+v", r)
+				}
+			}()
+
+			monitoring.ReportHTTPMetrics(monitoring.HTTPMetrics{
+				Path:       c.FullPath(),
+				Method:     c.Request.Method,
+				StatusCode: c.Writer.Status(),
+				Duration:   duration,
+				ClientIP:   clientIP,
+			})
+		}()
 	}
+}
+
+// getClientIP 获取客户端真实IP
+func getClientIP(c *gin.Context) string {
+	// 优先从X-Real-IP获取
+	if ip := c.GetHeader("X-Real-IP"); ip != "" {
+		return ip
+	}
+
+	// 其次从X-Forwarded-For获取
+	if ip := c.GetHeader("X-Forwarded-For"); ip != "" {
+		return ip
+	}
+
+	// 最后从RemoteAddr获取
+	return c.ClientIP()
 }

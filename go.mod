@@ -4,6 +4,8 @@ go 1.23.2
 
 require (
 	git.code.oa.com/trpc-go/trpc-go v0.20.0
+	git.code.oa.com/trpc-go/trpc-log-zhiyan v0.1.3
+	git.code.oa.com/trpc-go/trpc-metrics-zhiyan v0.3.11
 	github.com/PuerkitoBio/goquery v1.10.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/glebarez/sqlite v1.11.0
@@ -33,15 +35,17 @@ require (
 
 require (
 	git.code.oa.com/polaris/polaris-go v0.9.6 // indirect
-	git.code.oa.com/trpc-go/trpc-log-zhiyan v0.1.3 // indirect
 	git.code.oa.com/zhiyan-log/sdk-go v0.1.10 // indirect
+	git.woa.com/trpc-go/trpc-metrics-zhiyan/v2 v2.1.5 // indirect
+	git.woa.com/zhiyan-monitor/sdk/go-sdk/v3 v3.3.6 // indirect
+	git.woa.com/zhiyan-monitor/t-digest v0.0.6 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/natefinch/lumberjack v2.0.0+incompatible // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	google.golang.org/genproto v0.0.0-20180817151627-c66870c02cf8 // indirect
-	google.golang.org/grpc v1.22.0 // indirect
+	google.golang.org/genproto v0.0.0-20210917145530-b395a37504d4 // indirect
+	google.golang.org/grpc v1.40.0 // indirect
 )
 
 require (
@@ -49,7 +53,7 @@ require (
 	git.woa.com/jce/jce v1.2.0 // indirect
 	git.woa.com/trpc-go/go_reuseport v1.7.0 // indirect
 	git.woa.com/trpc-go/tnet v0.1.0 // indirect
-	github.com/BurntSushi/toml v0.3.1 // indirect
+	github.com/BurntSushi/toml v0.4.1 // indirect
 	github.com/Mzack9999/gcache v0.0.0-20230410081825-519e28eab057 // indirect
 	github.com/Mzack9999/go-http-digest-auth-client v0.6.1-0.20220414142836-eb8883508809 // indirect
 	github.com/akrylysov/pogreb v0.10.1 // indirect
