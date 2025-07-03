@@ -6,13 +6,21 @@ import (
 	"git.code.oa.com/trpc-go/trpc-go"
 	"git.code.oa.com/trpc-go/trpc-go/codec"
 	"git.code.oa.com/trpc-go/trpc-go/log"
+	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
 	"github.com/Tencent/AI-Infra-Guard/common/monitoring"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // TrpcMiddleware 创建trpc-go集成中间件
 func TrpcMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 生成trace_id
+		traceID := uuid.New().String()
+
+		// 将trace_id放入gin context
+		c.Set("trace_id", traceID)
+
 		// 保存原始context
 		savedCtx := c.Request.Context()
 
@@ -33,11 +41,19 @@ func TrpcMiddleware() gin.HandlerFunc {
 		// 记录请求开始时间
 		startTime := time.Now()
 
+		// 记录请求开始日志
+		log.Infof("请求开始: trace_id=%s, method=%s, path=%s, client_ip=%s",
+			traceID, c.Request.Method, c.FullPath(), getClientIP(c))
+
 		// 继续处理请求
 		c.Next()
 
 		// 计算请求耗时
 		duration := time.Since(startTime)
+
+		// 记录请求结束日志
+		log.Infof("请求结束: trace_id=%s, method=%s, path=%s, status=%d, duration=%v",
+			traceID, c.Request.Method, c.FullPath(), c.Writer.Status(), duration)
 
 		// 获取客户端IP
 		clientIP := getClientIP(c)
@@ -46,7 +62,7 @@ func TrpcMiddleware() gin.HandlerFunc {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Errorf("监控函数panic: %+v", r)
+					log.Errorf("监控函数panic: trace_id=%s, error=%+v", traceID, r)
 				}
 			}()
 

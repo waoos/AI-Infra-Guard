@@ -4,8 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
 	"git.code.oa.com/trpc-go/trpc-go/metrics"
+	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
+	"git.woa.com/trpc-go/tnet/log"
 	_ "git.woa.com/trpc-go/trpc-metrics-zhiyan/v2"
 )
 

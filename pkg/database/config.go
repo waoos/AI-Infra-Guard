@@ -19,6 +19,19 @@ func NewConfig(dbPath string) *Config {
 	return &Config{DBPath: dbPath}
 }
 
+// LoadConfigFromEnv 从环境变量加载数据库配置
+func LoadConfigFromEnv() *Config {
+	// 默认数据库路径
+	defaultDBPath := "db/tasks.db"
+
+	// 从环境变量读取数据库路径
+	if dbPath := os.Getenv("DB_PATH"); dbPath != "" {
+		defaultDBPath = dbPath
+	}
+
+	return &Config{DBPath: defaultDBPath}
+}
+
 // InitDB 用 GORM 初始化数据库连接并返回 *gorm.DB
 func InitDB(config *Config) (*gorm.DB, error) {
 	// 确保数据库目录存在

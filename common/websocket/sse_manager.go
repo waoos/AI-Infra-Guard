@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"git.code.oa.com/trpc-go/trpc-go/log"
+	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 )
 

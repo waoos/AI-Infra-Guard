@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"git.code.oa.com/trpc-go/trpc-go/log"
+	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -47,12 +48,11 @@ const (
 
 // AgentConnection 管理单个agent的连接
 type AgentConnection struct {
-	conn          *websocket.Conn
-	agentID       string
-	currentTaskID string // 当前执行的任务ID
+	conn    *websocket.Conn
+	agentID string
 
 	// 细粒度的锁控制
-	stateMu sync.RWMutex // 保护连接状态（agentID, isActive, currentTaskID）
+	stateMu sync.RWMutex // 保护连接状态（agentID, isActive）
 	writeMu sync.Mutex   // 保护写操作（发送消息）
 
 	isActive bool
@@ -271,7 +271,7 @@ func (ac *AgentConnection) handleRegister(am *AgentManager, content interface{})
 	ac.stateMu.Unlock()
 
 	log.Infof("Agent注册成功: agentId=%s, hostname=%s, ip=%s, version=%s", rc.AgentID, rc.Hostname, rc.IP, rc.Version)
-
+	gologger.Infof("Agent注册成功: agentId=%s, hostname=%s, ip=%s, version=%s", rc.AgentID, rc.Hostname, rc.IP, rc.Version)
 	// 发送注册成功响应
 	response := WSMessage{
 		Type: "register_ack",
@@ -337,43 +337,40 @@ func (ac *AgentConnection) writePump() {
 		ticker.Stop()
 	}()
 
-	for {
-		select {
-		case <-ticker.C:
+	for range ticker.C {
+		ac.stateMu.RLock()
+		if !ac.isActive {
+			ac.stateMu.RUnlock()
+			return
+		}
+
+		// 设置写超时
+		ac.conn.SetWriteDeadline(time.Now().Add(writeWait))
+
+		// 尝试发送ping消息
+		err := ac.conn.WriteMessage(websocket.PingMessage, nil)
+		if err != nil {
+			ac.stateMu.RUnlock()
+
+			// 尝试重试一次
+			time.Sleep(1 * time.Second)
 			ac.stateMu.RLock()
 			if !ac.isActive {
 				ac.stateMu.RUnlock()
 				return
 			}
-
-			// 设置写超时
 			ac.conn.SetWriteDeadline(time.Now().Add(writeWait))
-
-			// 尝试发送ping消息
-			err := ac.conn.WriteMessage(websocket.PingMessage, nil)
+			err = ac.conn.WriteMessage(websocket.PingMessage, nil)
 			if err != nil {
 				ac.stateMu.RUnlock()
-
-				// 尝试重试一次
-				time.Sleep(1 * time.Second)
-				ac.stateMu.RLock()
-				if !ac.isActive {
-					ac.stateMu.RUnlock()
-					return
-				}
-				ac.conn.SetWriteDeadline(time.Now().Add(writeWait))
-				err = ac.conn.WriteMessage(websocket.PingMessage, nil)
-				if err != nil {
-					ac.stateMu.RUnlock()
-					ac.stateMu.Lock()
-					ac.isActive = false
-					ac.stateMu.Unlock()
-					return
-				}
+				ac.stateMu.Lock()
+				ac.isActive = false
+				ac.stateMu.Unlock()
+				return
 			}
-
-			ac.stateMu.RUnlock()
 		}
+
+		ac.stateMu.RUnlock()
 	}
 }
 
@@ -452,7 +449,7 @@ func (ac *AgentConnection) handleAgentEvent(am *AgentManager, content interface{
 	// 转发给 TaskManager 处理
 	am.mu.RLock()
 	if am.taskManager != nil {
-		am.taskManager.HandleAgentEvent(sessionId, eventType, event)
+		am.taskManager.HandleAgentEvent(sessionId, eventType, event, "")
 	} else {
 		log.Errorf("TaskManager未初始化，无法处理Agent事件: agentId=%s, sessionId=%s", ac.agentID, sessionId)
 	}

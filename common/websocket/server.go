@@ -26,7 +26,7 @@ func RunWebServer(options *options.Options) {
 	if err := trpc.InitTrpc("./trpc_go.yaml"); err != nil {
 		gologger.Fatalf("Trpc-go初始化失败: %v", err)
 	}
-	log.Info("Trpc-go initialized successfully")
+	log.Infof("Trpc-go initialized successfully: trace_id=system_startup")
 
 	r := gin.Default()
 	wsServer := NewWSServer(options)
@@ -36,15 +36,15 @@ func RunWebServer(options *options.Options) {
 	// r.Use(middleware.MetricsMiddleware()) // 移除HTTP监控中间件，依赖TRPC自动监控
 
 	// 3. 初始化数据库和Agentmanager
-	dbConfig := database.NewConfig("db/tasks.db") // 推荐单独目录
+	dbConfig := database.LoadConfigFromEnv() // 从环境变量加载数据库配置
 	db, err := database.InitDB(dbConfig)
 	if err != nil {
-		log.Errorf("数据库初始化失败: %v", err)
+		log.Errorf("数据库初始化失败: trace_id=system_startup, error=%v", err)
 		gologger.Fatalf("数据库初始化失败: %v", err)
 	}
 	taskStore := database.NewTaskStore(db)
 	if err := taskStore.Init(); err != nil {
-		log.Errorf("初始化tasks表失败: %v", err)
+		log.Errorf("初始化tasks表失败: trace_id=system_startup, error=%v", err)
 		gologger.Fatalf("初始化tasks表失败: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func RunWebServer(options *options.Options) {
 
 	// 验证文件上传配置
 	if err := fileConfig.ValidateConfig(); err != nil {
-		log.Errorf("文件上传配置验证失败: %v", err)
+		log.Errorf("文件上传配置验证失败: trace_id=system_startup, error=%v", err)
 		gologger.Fatalf("文件上传配置验证失败: %v", err)
 	}
 
@@ -213,10 +213,10 @@ func RunWebServer(options *options.Options) {
 	// }
 
 	// 启动服务器
-	log.Infof("Starting WebServer on http://%s", options.WebServerAddr)
+	log.Infof("Starting WebServer: trace_id=system_startup, addr=%s", options.WebServerAddr)
 	gologger.Infof("Starting WebServer on http://%s\n", options.WebServerAddr)
 	if err := r.Run(options.WebServerAddr); err != nil {
-		log.Errorf("Could not start WebSocket server: %s", err)
+		log.Errorf("Could not start WebSocket server: trace_id=system_startup, error=%s", err)
 		gologger.Fatalf("Could not start WebSocket server: %s\n", err)
 	}
 }
