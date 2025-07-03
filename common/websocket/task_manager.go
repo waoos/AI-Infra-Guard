@@ -452,8 +452,10 @@ func (tm *TaskManager) notifyAgentToTerminate(agentID string, sessionId string) 
 			// 使用SendMessageWithRetry方法，避免直接访问conn
 			err := agent.SendMessageWithRetry(terminateMsg, 3)
 			if err != nil {
+				log.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
 				gologger.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
 			} else {
+				log.Infof("终止消息已发送给Agent %s: sessionId=%s", agentID, sessionId)
 				gologger.Infof("终止消息已发送给Agent %s: sessionId=%s", agentID, sessionId)
 			}
 			break
@@ -476,6 +478,7 @@ func (tm *TaskManager) sendTerminationEvent(sessionId string) {
 	// 使用通用事件处理函数
 	tm.handleEvent(sessionId, "statusUpdate", event)
 
+	log.Infof("终止事件已发送: sessionId=%s", sessionId)
 	gologger.Infof("终止事件已发送: sessionId=%s", sessionId)
 }
 
@@ -489,11 +492,13 @@ func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest, user
 	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
+		log.Errorf("任务不存在: sessionId=%s, username=%s", sessionId, username)
 		return fmt.Errorf("任务不存在")
 	}
 
 	// 验证用户权限（只有任务创建者才能更新任务）
 	if session.Username != username {
+		log.Errorf("无权限操作此任务: sessionId=%s, username=%s, owner=%s", sessionId, username, session.Username)
 		return fmt.Errorf("无权限操作此任务")
 	}
 
@@ -507,6 +512,7 @@ func (tm *TaskManager) UpdateTask(sessionId string, req *TaskUpdateRequest, user
 	// 执行数据库更新
 	err = tm.taskStore.UpdateSession(sessionId, updates)
 	if err != nil {
+		log.Errorf("更新任务信息失败: sessionId=%s, error=%v", sessionId, err)
 		return fmt.Errorf("更新任务信息失败: %v", err)
 	}
 
@@ -518,23 +524,27 @@ func (tm *TaskManager) DeleteTask(sessionId string, username string) error {
 	// 检查任务是否存在
 	session, err := tm.taskStore.GetSession(sessionId)
 	if err != nil {
+		log.Errorf("任务不存在: sessionId=%s, username=%s", sessionId, username)
 		return fmt.Errorf("任务不存在")
 	}
 
 	// 验证用户权限（只有任务创建者才能删除任务）
 	if session.Username != username {
+		log.Errorf("无权限操作此任务: sessionId=%s, username=%s, owner=%s", sessionId, username, session.Username)
 		return fmt.Errorf("无权限操作此任务")
 	}
 
 	// 使用事务删除会话及其所有消息
 	err = tm.taskStore.DeleteSessionWithMessages(sessionId)
 	if err != nil {
+		log.Errorf("删除任务失败: sessionId=%s, error=%v", sessionId, err)
 		return fmt.Errorf("删除任务失败: %v", err)
 	}
 
 	// 删除附件文件
 	err = tm.deleteSessionAttachments(session)
 	if err != nil {
+		log.Errorf("删除附件文件失败: %v", err)
 		gologger.Warnf("删除附件文件失败: %v", err)
 		// 附件删除失败不影响主流程，只记录警告
 	}
@@ -547,6 +557,7 @@ func (tm *TaskManager) DeleteTask(sessionId string, username string) error {
 	// 关闭SSE连接
 	tm.CloseSSESession(sessionId)
 
+	log.Infof("任务删除完成: sessionId=%s", sessionId)
 	gologger.Infof("任务删除完成: sessionId=%s", sessionId)
 	return nil
 }
