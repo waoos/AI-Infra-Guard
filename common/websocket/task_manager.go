@@ -68,50 +68,14 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 	// 开始任务监控（记录开始时间）
 	monitoring.StartTaskMonitoring(req.SessionID)
 
-	// 先检查数据库中是否已存在相同的sessionId
+	// 1. 先检查数据库中是否已存在相同的sessionId
 	existingSession, err := tm.taskStore.GetSession(req.SessionID)
 	if err == nil && existingSession != nil {
 		log.Errorf("任务已存在: trace_id=%s, sessionId=%s, username=%s", traceID, req.SessionID, req.Username)
 		return fmt.Errorf("任务已存在，sessionId: %s", req.SessionID)
 	}
 
-	// 检查SSE连接是否已建立（5秒超时等待）
-	timeout := 3 * time.Second
-	start := time.Now()
-	for time.Since(start) < timeout {
-		if tm.sseManager.HasConnection(req.SessionID) {
-			break // 连接已建立
-		}
-		time.Sleep(50 * time.Millisecond) // 每100ms检查一次
-	}
-
-	if !tm.sseManager.HasConnection(req.SessionID) {
-		log.Errorf("SSE连接建立超时: trace_id=%s, sessionId=%s, username=%s, timeout=%v", traceID, req.SessionID, req.Username, timeout)
-		return fmt.Errorf("SSE连接建立超时，请重试，sessionId: %s", req.SessionID)
-	}
-
-	// 先存储任务到内存（dispatchTask需要从内存中获取任务）
-	tm.mu.Lock()
-	tm.tasks[req.SessionID] = req
-	tm.mu.Unlock()
-
-	// 尝试分发任务
-	err = tm.dispatchTask(req.SessionID, traceID)
-	if err != nil {
-		// 分发失败，清理内存中的任务
-		tm.mu.Lock()
-		delete(tm.tasks, req.SessionID)
-		tm.mu.Unlock()
-		log.Errorf("任务分发失败: trace_id=%s, sessionId=%s, error=%v", traceID, req.SessionID, err)
-		gologger.Errorf("任务分发失败: %v", err)
-
-		// 上报任务创建失败监控
-		monitoring.EndTaskCreationMonitoring(req.Task, "failed", req.SessionID)
-
-		return fmt.Errorf("任务分发失败: %v", err)
-	}
-
-	// 任务分发成功，在数据库中创建会话记录
+	// 2. 预存任务到数据库（状态为todo，assigned_agent为空）
 	session := &database.Session{
 		ID:            req.SessionID,
 		Username:      req.Username,
@@ -121,23 +85,52 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 		Params:        mustMarshalJSON(req.Params),
 		Attachments:   mustMarshalJSON(req.Attachments),
 		Status:        TaskStatusTodo,
-		AssignedAgent: "",
+		AssignedAgent: "", // 预存时为空
 		ContryIsoCode: req.ContryIsoCode,
 	}
 
 	err = tm.taskStore.CreateSession(session)
 	if err != nil {
-		// 如果存储失败，清理内存中的任务
-		tm.mu.Lock()
-		delete(tm.tasks, req.SessionID)
-		tm.mu.Unlock()
-		log.Errorf("创建会话记录失败: trace_id=%s, sessionId=%s, error=%v", traceID, req.SessionID, err)
-		gologger.Errorf("创建会话记录失败: %v", err)
+		log.Errorf("预存任务到数据库失败: trace_id=%s, sessionId=%s, error=%v", traceID, req.SessionID, err)
+		return fmt.Errorf("预存任务失败: %v", err)
+	}
+
+	log.Infof("任务预存成功: trace_id=%s, sessionId=%s", traceID, req.SessionID)
+
+	// 3. 等待SSE连接建立（3秒超时）
+	timeout := 3 * time.Second
+	start := time.Now()
+	for time.Since(start) < timeout {
+		if tm.sseManager.HasConnection(req.SessionID) {
+			break // 连接已建立
+		}
+		time.Sleep(50 * time.Millisecond) // 每50ms检查一次
+	}
+
+	if !tm.sseManager.HasConnection(req.SessionID) {
+		// SSE连接超时，清理预存的任务
+		tm.cleanupFailedTask(req.SessionID, traceID)
+		log.Errorf("SSE连接建立超时: trace_id=%s, sessionId=%s, username=%s, timeout=%v", traceID, req.SessionID, req.Username, timeout)
+		return fmt.Errorf("SSE连接建立超时，请重试，sessionId: %s", req.SessionID)
+	}
+
+	// 4. 存储任务到内存（dispatchTask需要从内存中获取任务）
+	tm.mu.Lock()
+	tm.tasks[req.SessionID] = req
+	tm.mu.Unlock()
+
+	// 5. 尝试分发任务
+	err = tm.dispatchTask(req.SessionID, traceID)
+	if err != nil {
+		// 分发失败，清理内存和数据库中的预存内容
+		tm.cleanupFailedTask(req.SessionID, traceID)
+		log.Errorf("任务分发失败: trace_id=%s, sessionId=%s, error=%v", traceID, req.SessionID, err)
+		gologger.Errorf("任务分发失败: %v", err)
 
 		// 上报任务创建失败监控
 		monitoring.EndTaskCreationMonitoring(req.Task, "failed", req.SessionID)
 
-		return fmt.Errorf("创建会话记录失败: %v", err)
+		return fmt.Errorf("任务分发失败: %v", err)
 	}
 
 	log.Infof("任务添加成功: trace_id=%s, sessionId=%s, taskType=%s", traceID, req.SessionID, req.Task)
@@ -147,6 +140,24 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 	monitoring.EndTaskCreationMonitoring(req.Task, "created", req.SessionID)
 
 	return nil
+}
+
+// cleanupFailedTask 清理失败的任务（内存和数据库）
+func (tm *TaskManager) cleanupFailedTask(sessionId string, traceID string) {
+	log.Infof("开始清理失败任务: trace_id=%s, sessionId=%s", traceID, sessionId)
+
+	// 清理内存中的任务
+	tm.mu.Lock()
+	delete(tm.tasks, sessionId)
+	tm.mu.Unlock()
+
+	// 清理数据库中的预存任务
+	err := tm.taskStore.DeleteSession(sessionId)
+	if err != nil {
+		log.Errorf("清理数据库中的失败任务失败: trace_id=%s, sessionId=%s, error=%v", traceID, sessionId, err)
+	} else {
+		log.Infof("失败任务清理完成: trace_id=%s, sessionId=%s", traceID, sessionId)
+	}
 }
 
 // 获取任务
