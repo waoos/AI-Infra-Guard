@@ -68,13 +68,35 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 	// 开始任务监控（记录开始时间）
 	monitoring.StartTaskMonitoring(req.SessionID)
 
+	// 先检查数据库中是否已存在相同的sessionId
+	existingSession, err := tm.taskStore.GetSession(req.SessionID)
+	if err == nil && existingSession != nil {
+		log.Errorf("任务已存在: trace_id=%s, sessionId=%s, username=%s", traceID, req.SessionID, req.Username)
+		return fmt.Errorf("任务已存在，sessionId: %s", req.SessionID)
+	}
+
+	// 检查SSE连接是否已建立（5秒超时等待）
+	timeout := 3 * time.Second
+	start := time.Now()
+	for time.Since(start) < timeout {
+		if tm.sseManager.HasConnection(req.SessionID) {
+			break // 连接已建立
+		}
+		time.Sleep(50 * time.Millisecond) // 每100ms检查一次
+	}
+
+	if !tm.sseManager.HasConnection(req.SessionID) {
+		log.Errorf("SSE连接建立超时: trace_id=%s, sessionId=%s, username=%s, timeout=%v", traceID, req.SessionID, req.Username, timeout)
+		return fmt.Errorf("SSE连接建立超时，请重试，sessionId: %s", req.SessionID)
+	}
+
 	// 先存储任务到内存（dispatchTask需要从内存中获取任务）
 	tm.mu.Lock()
 	tm.tasks[req.SessionID] = req
 	tm.mu.Unlock()
 
 	// 尝试分发任务
-	err := tm.dispatchTask(req.SessionID, traceID)
+	err = tm.dispatchTask(req.SessionID, traceID)
 	if err != nil {
 		// 分发失败，清理内存中的任务
 		tm.mu.Lock()

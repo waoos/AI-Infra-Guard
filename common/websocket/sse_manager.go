@@ -226,3 +226,11 @@ func (sm *SSEManager) GetConnectionsByUser(username string) []string {
 	log.Debugf("用户SSE连接查询: username=%s, connectionCount=%d", username, len(sessionIDs))
 	return sessionIDs
 }
+
+// HasConnection 检查指定sessionId的连接是否存在
+func (sm *SSEManager) HasConnection(sessionID string) bool {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	_, exists := sm.connections[sessionID]
+	return exists
+}
