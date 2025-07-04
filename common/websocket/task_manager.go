@@ -250,63 +250,63 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 }
 
 // HandleAgentEvent 处理来自Agent的事件
-func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, event interface{}, traceID string) {
-	log.Debugf("收到Agent事件: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
-	gologger.Debugf("收到Agent事件: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
+func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, event interface{}) {
+	log.Debugf("收到Agent事件: sessionId=%s, eventType=%s", sessionId, eventType)
+	gologger.Debugf("收到Agent事件: sessionId=%s, eventType=%s", sessionId, eventType)
 
 	// 使用通用事件处理函数
-	tm.handleEvent(sessionId, eventType, event, traceID)
+	tm.handleEvent(sessionId, eventType, event)
 
 	// 根据事件类型记录特定日志
 	switch eventType {
 	case "liveStatus":
 		if convertedEvent, err := convertToStruct(event, &LiveStatusEvent{}); err == nil {
 			if liveStatusEvent, ok := convertedEvent.(*LiveStatusEvent); ok {
-				log.Debugf("liveStatus事件详情: trace_id=%s, sessionId=%s, text=%s", traceID, sessionId, liveStatusEvent.Text)
-				gologger.Debugf("liveStatus事件详情: trace_id=%s, sessionId=%s, text=%s", traceID, sessionId, liveStatusEvent.Text)
+				log.Debugf("liveStatus事件详情: sessionId=%s, text=%s", sessionId, liveStatusEvent.Text)
+				gologger.Debugf("liveStatus事件详情: sessionId=%s, text=%s", sessionId, liveStatusEvent.Text)
 			}
 		}
 	case "planUpdate":
 		if convertedEvent, err := convertToStruct(event, &PlanUpdateEvent{}); err == nil {
 			if planUpdateEvent, ok := convertedEvent.(*PlanUpdateEvent); ok {
-				log.Infof("收到计划更新: trace_id=%s, sessionId=%s, tasks=%d", traceID, sessionId, len(planUpdateEvent.Tasks))
-				gologger.Debugf("planUpdate事件详情: trace_id=%s, sessionId=%s, tasks=%d", traceID, sessionId, len(planUpdateEvent.Tasks))
+				log.Infof("收到计划更新: sessionId=%s, tasks=%d", sessionId, len(planUpdateEvent.Tasks))
+				gologger.Debugf("planUpdate事件详情: sessionId=%s, tasks=%d", sessionId, len(planUpdateEvent.Tasks))
 			}
 		}
 	case "newPlanStep":
 		if convertedEvent, err := convertToStruct(event, &NewPlanStepEvent{}); err == nil {
 			if newPlanStepEvent, ok := convertedEvent.(*NewPlanStepEvent); ok {
-				log.Infof("新计划步骤: trace_id=%s, sessionId=%s, stepId=%s", traceID, sessionId, newPlanStepEvent.StepID)
-				gologger.Debugf("newPlanStep事件详情: trace_id=%s, sessionId=%s, stepId=%s", traceID, sessionId, newPlanStepEvent.StepID)
+				log.Infof("新计划步骤: sessionId=%s, stepId=%s", sessionId, newPlanStepEvent.StepID)
+				gologger.Debugf("newPlanStep事件详情: sessionId=%s, stepId=%s", sessionId, newPlanStepEvent.StepID)
 			}
 		}
 	case "statusUpdate":
 		if convertedEvent, err := convertToStruct(event, &StatusUpdateEvent{}); err == nil {
 			if statusUpdateEvent, ok := convertedEvent.(*StatusUpdateEvent); ok {
-				log.Infof("状态更新: trace_id=%s, sessionId=%s, status=%s", traceID, sessionId, statusUpdateEvent.AgentStatus)
-				gologger.Debugf("statusUpdate事件详情: trace_id=%s, sessionId=%s, status=%s", traceID, sessionId, statusUpdateEvent.AgentStatus)
+				log.Infof("状态更新: sessionId=%s, status=%s", sessionId, statusUpdateEvent.AgentStatus)
+				gologger.Debugf("statusUpdate事件详情: sessionId=%s, status=%s", sessionId, statusUpdateEvent.AgentStatus)
 			}
 		}
 	case "toolUsed":
 		if convertedEvent, err := convertToStruct(event, &ToolUsedEvent{}); err == nil {
 			if toolUsedEvent, ok := convertedEvent.(*ToolUsedEvent); ok {
-				log.Infof("工具使用: trace_id=%s, sessionId=%s, tools=%d", traceID, sessionId, len(toolUsedEvent.Tools))
-				gologger.Debugf("toolUsed事件详情: trace_id=%s, sessionId=%s, tools=%d", traceID, sessionId, len(toolUsedEvent.Tools))
+				log.Infof("工具使用: sessionId=%s, tools=%d", sessionId, len(toolUsedEvent.Tools))
+				gologger.Debugf("toolUsed事件详情: sessionId=%s, tools=%d", sessionId, len(toolUsedEvent.Tools))
 			}
 		}
 	case "actionLog":
 		if convertedEvent, err := convertToStruct(event, &ActionLogEvent{}); err == nil {
 			if actionLogEvent, ok := convertedEvent.(*ActionLogEvent); ok {
-				log.Debugf("动作日志: trace_id=%s, sessionId=%s, actionId=%s", traceID, sessionId, actionLogEvent.ActionID)
-				gologger.Debugf("actionLog事件详情: trace_id=%s, sessionId=%s, actionId=%s", traceID, sessionId, actionLogEvent.ActionID)
+				log.Debugf("动作日志: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
+				gologger.Debugf("actionLog事件详情: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
 			}
 		}
 	case "resultUpdate":
 		if convertedEvent, err := convertToStruct(event, &ResultUpdateEvent{}); err == nil {
 			if resultUpdateEvent, ok := convertedEvent.(*ResultUpdateEvent); ok {
-				log.Infof("任务完成: trace_id=%s, sessionId=%s, fileName=%s", traceID, sessionId, resultUpdateEvent.Result.FileName)
-				gologger.Debugf("resultUpdate事件详情: trace_id=%s, sessionId=%s, fileName=%s",
-					traceID, sessionId, resultUpdateEvent.Result.FileName)
+				log.Infof("任务完成: sessionId=%s, fileName=%s", sessionId, resultUpdateEvent.Result.FileName)
+				gologger.Debugf("resultUpdate事件详情: sessionId=%s, fileName=%s",
+					sessionId, resultUpdateEvent.Result.FileName)
 
 				// 获取任务信息用于监控
 				task, exists := tm.GetTask(sessionId)
@@ -318,19 +318,19 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 				// 更新任务状态为已完成
 				err := tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusDone)
 				if err != nil {
-					log.Errorf("更新任务状态为已完成失败: trace_id=%s, sessionId=%s, error=%v", traceID, sessionId, err)
+					log.Errorf("更新任务状态为已完成失败: sessionId=%s, error=%v", sessionId, err)
 					gologger.Errorf("更新任务状态为已完成失败: %v", err)
 				} else {
-					log.Infof("任务状态已更新为已完成: trace_id=%s, sessionId=%s", traceID, sessionId)
-					gologger.Infof("任务状态已更新为已完成: trace_id=%s, sessionId=%s", traceID, sessionId)
+					log.Infof("任务状态已更新为已完成: sessionId=%s", sessionId)
+					gologger.Infof("任务状态已更新为已完成: sessionId=%s", sessionId)
 				}
 				// 任务完成，可以清理资源
-				go tm.cleanupTask(sessionId, traceID)
+				go tm.cleanupTask(sessionId)
 			}
 		}
 	default:
-		log.Debugf("未知事件类型: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
-		gologger.Debugf("未知事件类型: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
+		log.Debugf("未知事件类型: sessionId=%s, eventType=%s", sessionId, eventType)
+		gologger.Debugf("未知事件类型: sessionId=%s, eventType=%s", sessionId, eventType)
 	}
 }
 
@@ -372,8 +372,8 @@ func generateUUID() string {
 }
 
 // 通用事件处理函数
-func (tm *TaskManager) handleEvent(sessionId string, eventType string, event interface{}, traceID string) {
-	log.Debugf("开始处理事件: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
+func (tm *TaskManager) handleEvent(sessionId string, eventType string, event interface{}) {
+	log.Debugf("开始处理事件: sessionId=%s, eventType=%s", sessionId, eventType)
 
 	// 生成事件ID
 	id := generateEventID()
@@ -384,7 +384,7 @@ func (tm *TaskManager) handleEvent(sessionId string, eventType string, event int
 	// 存储事件到数据库
 	err := tm.taskStore.StoreEvent(id, sessionId, eventType, event, timestamp)
 	if err != nil {
-		log.Errorf("存储事件失败: trace_id=%s, sessionId=%s, eventType=%s, error=%v", traceID, sessionId, eventType, err)
+		log.Errorf("存储事件失败: sessionId=%s, eventType=%s, error=%v", sessionId, eventType, err)
 		gologger.Errorf("存储%s事件失败: %v", eventType, err)
 		return
 	}
@@ -394,18 +394,18 @@ func (tm *TaskManager) handleEvent(sessionId string, eventType string, event int
 	if err != nil {
 		// 如果是连接不存在的错误，记录为调试信息而不是错误
 		if strings.Contains(err.Error(), "连接不存在") {
-			log.Debugf("SSE连接已关闭，跳过事件推送: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
-			gologger.Debugf("SSE连接已关闭，跳过事件推送: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
+			log.Debugf("SSE连接已关闭，跳过事件推送: sessionId=%s, eventType=%s", sessionId, eventType)
+			gologger.Debugf("SSE连接已关闭，跳过事件推送: sessionId=%s, eventType=%s", sessionId, eventType)
 		} else {
-			log.Errorf("推送事件到SSE失败: trace_id=%s, sessionId=%s, eventType=%s, error=%v", traceID, sessionId, eventType, err)
+			log.Errorf("推送事件到SSE失败: sessionId=%s, eventType=%s, error=%v", sessionId, eventType, err)
 			gologger.Errorf("推送%s事件到SSE失败: %v", eventType, err)
 		}
 		return
 	}
 
 	// 记录日志
-	log.Debugf("事件处理完成: trace_id=%s, sessionId=%s, eventType=%s", traceID, sessionId, eventType)
-	gologger.Debugf("%s事件已处理: trace_id=%s, sessionId=%s", eventType, traceID, sessionId)
+	log.Debugf("事件处理完成: sessionId=%s, eventType=%s", sessionId, eventType)
+	gologger.Debugf("%s事件已处理: sessionId=%s", eventType, sessionId)
 }
 
 // getEventTimestamp 获取事件的时间戳
@@ -467,7 +467,7 @@ func (tm *TaskManager) TerminateTask(sessionId string, username string, traceID 
 	monitoring.EndTaskMonitoring(session.TaskType, "terminated", sessionId)
 
 	// 异步清理任务资源
-	go tm.cleanupTask(sessionId, traceID)
+	go tm.cleanupTask(sessionId)
 
 	return nil
 }
@@ -513,7 +513,7 @@ func (tm *TaskManager) sendTerminationEvent(sessionId string, traceID string) {
 	}
 
 	// 使用通用事件处理函数
-	tm.handleEvent(sessionId, "statusUpdate", event, traceID)
+	tm.handleEvent(sessionId, "statusUpdate", event)
 
 	log.Infof("终止事件已发送: trace_id=%s, sessionId=%s", traceID, sessionId)
 	gologger.Infof("终止事件已发送: trace_id=%s, sessionId=%s", traceID, sessionId)
@@ -593,7 +593,7 @@ func (tm *TaskManager) DeleteTask(sessionId string, username string, traceID str
 	tm.mu.Unlock()
 
 	// 关闭SSE连接
-	tm.CloseSSESession(sessionId, traceID)
+	tm.CloseSSESession(sessionId)
 
 	log.Infof("任务删除完成: trace_id=%s, sessionId=%s", traceID, sessionId)
 	gologger.Infof("任务删除完成: trace_id=%s, sessionId=%s", traceID, sessionId)
@@ -770,15 +770,15 @@ func (tm *TaskManager) EstablishSSEConnection(w http.ResponseWriter, sessionId s
 }
 
 // CloseSSESession 关闭SSE会话
-func (tm *TaskManager) CloseSSESession(sessionId string, traceID string) {
-	log.Infof("关闭SSE会话: trace_id=%s, sessionId=%s", traceID, sessionId)
+func (tm *TaskManager) CloseSSESession(sessionId string) {
+	log.Infof("关闭SSE会话: sessionId=%s", sessionId)
 	tm.sseManager.RemoveConnection(sessionId)
-	log.Infof("SSE会话已关闭: trace_id=%s, sessionId=%s", traceID, sessionId)
+	log.Infof("SSE会话已关闭: sessionId=%s", sessionId)
 }
 
 // 任务完成/中断时的清理
-func (tm *TaskManager) cleanupTask(sessionId string, traceID string) {
-	log.Infof("开始清理任务资源: trace_id=%s, sessionId=%s", traceID, sessionId)
+func (tm *TaskManager) cleanupTask(sessionId string) {
+	log.Infof("开始清理任务资源: sessionId=%s", sessionId)
 
 	// 清理内存中的任务数据
 	tm.mu.Lock()
@@ -786,10 +786,10 @@ func (tm *TaskManager) cleanupTask(sessionId string, traceID string) {
 	tm.mu.Unlock()
 
 	// 注意：SSE连接已在resultUpdate事件处理中立即清理
-	tm.CloseSSESession(sessionId, traceID)
+	tm.CloseSSESession(sessionId)
 
-	log.Infof("任务清理完成: trace_id=%s, sessionId=%s", traceID, sessionId)
-	gologger.Infof("任务清理完成: trace_id=%s, sessionId=%s", traceID, sessionId)
+	log.Infof("任务清理完成: sessionId=%s", sessionId)
+	gologger.Infof("任务清理完成: sessionId=%s", sessionId)
 }
 
 // GetTaskDetail 获取任务详情

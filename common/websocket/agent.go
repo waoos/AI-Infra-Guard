@@ -449,7 +449,7 @@ func (ac *AgentConnection) handleAgentEvent(am *AgentManager, content interface{
 	// 转发给 TaskManager 处理
 	am.mu.RLock()
 	if am.taskManager != nil {
-		am.taskManager.HandleAgentEvent(sessionId, eventType, event, "")
+		am.taskManager.HandleAgentEvent(sessionId, eventType, event)
 	} else {
 		log.Errorf("TaskManager未初始化，无法处理Agent事件: agentId=%s, sessionId=%s", ac.agentID, sessionId)
 	}

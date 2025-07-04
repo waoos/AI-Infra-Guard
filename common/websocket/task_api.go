@@ -158,7 +158,7 @@ func HandleTaskSSE(c *gin.Context, tm *TaskManager) {
 	<-c.Request.Context().Done()
 
 	// 客户端断开连接时，清理SSE连接
-	tm.CloseSSESession(sessionId, traceID)
+	tm.CloseSSESession(sessionId)
 	log.Infof("SSE连接已断开: trace_id=%s, sessionId=%s", traceID, sessionId)
 }
 
