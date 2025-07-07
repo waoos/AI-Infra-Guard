@@ -69,7 +69,7 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
 		"message": "获取模型列表成功",
-		"data":    nil,
+		"data":    models,
 	})
 }
 
@@ -120,7 +120,7 @@ func HandleGetModelDetail(c *gin.Context, mm *ModelManager) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
 		"message": "获取模型详情成功",
-		"data":    nil,
+		"data":    model,
 	})
 }
 
