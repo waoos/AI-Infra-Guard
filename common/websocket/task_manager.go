@@ -41,11 +41,12 @@ type TaskManager struct {
 	tasks        map[string]*TaskCreateRequest // sessionId -> 任务请求
 	agentManager *AgentManager                 // 新增：引用 AgentManager
 	taskStore    *database.TaskStore           // 新增：引用 TaskStore
+	modelStore   *database.ModelStore          // 新增：引用 ModelStore
 	fileConfig   *FileUploadConfig             // 新增：文件上传配置
 	sseManager   *SSEManager                   // 新增：SSE管理器
 }
 
-func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, fileConfig *FileUploadConfig, sseManager *SSEManager) *TaskManager {
+func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, modelStore *database.ModelStore, fileConfig *FileUploadConfig, sseManager *SSEManager) *TaskManager {
 	if fileConfig == nil {
 		fileConfig = DefaultFileUploadConfig()
 	}
@@ -56,6 +57,7 @@ func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, f
 		tasks:        make(map[string]*TaskCreateRequest),
 		agentManager: agentManager, // 注入 AgentManager
 		taskStore:    taskStore,    // 注入 TaskStore
+		modelStore:   modelStore,   // 注入 ModelStore
 		fileConfig:   fileConfig,   // 注入文件上传配置
 		sseManager:   sseManager,   // 注入SSE管理器
 	}
@@ -221,14 +223,47 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 		return fmt.Errorf("无法更新session的assigned_agent")
 	}
 
-	// 6. 构造任务分配消息
+	// 6. 处理params中的modelid，获取模型信息
+	enhancedParams := task.Params
+	if task.Params != nil {
+		if modelID, exists := task.Params["model_id"]; exists {
+			if modelIDStr, ok := modelID.(string); ok && modelIDStr != "" {
+				log.Infof("处理模型ID: trace_id=%s, sessionId=%s, modelID=%s", traceID, sessionId, modelIDStr)
+
+				// 从数据库获取模型信息
+				model, err := tm.modelStore.GetModel(modelIDStr)
+				if err != nil {
+					log.Errorf("获取模型信息失败: trace_id=%s, sessionId=%s, modelID=%s, error=%v", traceID, sessionId, modelIDStr, err)
+					return fmt.Errorf("获取模型信息失败: %v", err)
+				}
+
+				// 构造模型信息
+				modelInfo := map[string]interface{}{
+					"model":    model.ModelName,
+					"token":    model.Token,
+					"base_url": model.BaseURL,
+				}
+
+				// 创建新的params，包含模型信息
+				enhancedParams = make(map[string]interface{})
+				for k, v := range task.Params {
+					enhancedParams[k] = v
+				}
+				enhancedParams["model"] = modelInfo
+
+				log.Infof("模型信息已添加到params: trace_id=%s, sessionId=%s, modelID=%s", traceID, sessionId, modelIDStr)
+			}
+		}
+	}
+
+	// 7. 构造任务分配消息
 	taskMsg := WSMessage{
 		Type: WSMsgTypeTaskAssign,
 		Content: TaskContent{
 			SessionID:   task.SessionID,
 			TaskType:    task.Task,
 			Content:     task.Content,
-			Params:      task.Params,
+			Params:      enhancedParams,
 			Attachments: task.Attachments,
 			Timeout:     3600,
 		},

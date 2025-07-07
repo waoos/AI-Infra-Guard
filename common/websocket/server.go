@@ -48,8 +48,18 @@ func RunWebServer(options *options.Options) {
 		gologger.Fatalf("初始化tasks表失败: %v", err)
 	}
 
+	// 初始化模型存储
+	modelStore := database.NewModelStore(db)
+	if err := modelStore.Init(); err != nil {
+		log.Errorf("初始化models表失败: trace_id=system_startup, error=%v", err)
+		gologger.Fatalf("初始化models表失败: %v", err)
+	}
+
 	// 初始化AgentManager
 	agentManager := NewAgentManager()
+
+	// 初始化ModelManager
+	modelManager := NewModelManager(modelStore)
 
 	// 初始化文件上传配置（支持环境变量）
 	fileConfig := LoadFileUploadConfigFromEnv()
@@ -63,7 +73,7 @@ func RunWebServer(options *options.Options) {
 	// 初始化SSE管理器
 	sseManager := NewSSEManager()
 
-	taskManager := NewTaskManager(agentManager, taskStore, fileConfig, sseManager)
+	taskManager := NewTaskManager(agentManager, taskStore, modelStore, fileConfig, sseManager)
 
 	// 将 TaskManager 注入到 AgentManager
 	agentManager.SetTaskManager(taskManager)
@@ -154,6 +164,31 @@ func RunWebServer(options *options.Options) {
 				// 终止任务接口
 				tasks.POST("/:sessionId/terminate", func(c *gin.Context) {
 					HandleTerminateTask(c, taskManager)
+				})
+			}
+
+			// 模型管理
+			models := appSecurity.Group("/models")
+			{
+				// 获取模型列表接口
+				models.GET("", func(c *gin.Context) {
+					HandleGetModelList(c, modelManager)
+				})
+				// 获取模型详情接口
+				models.GET("/:modelId", func(c *gin.Context) {
+					HandleGetModelDetail(c, modelManager)
+				})
+				// 创建模型接口
+				models.POST("", func(c *gin.Context) {
+					HandleCreateModel(c, modelManager)
+				})
+				// 更新模型接口
+				models.PUT("/:modelId", func(c *gin.Context) {
+					HandleUpdateModel(c, modelManager)
+				})
+				// 删除模型接口（支持单个和批量）
+				models.DELETE("", func(c *gin.Context) {
+					HandleDeleteModel(c, modelManager)
 				})
 			}
 		}
