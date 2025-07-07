@@ -52,8 +52,8 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 
 	log.Infof("用户请求获取模型列表: trace_id=%s, username=%s", traceID, username)
 
-	// 获取所有模型
-	models, err := mm.modelStore.GetAllModels()
+	// 获取用户的模型列表（只返回该用户创建的模型）
+	models, err := mm.modelStore.GetUserModels(username)
 	if err != nil {
 		log.Errorf("获取模型列表失败: trace_id=%s, username=%s, error=%v", traceID, username, err)
 		c.JSON(http.StatusOK, gin.H{
