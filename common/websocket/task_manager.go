@@ -79,16 +79,16 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 
 	// 2. 预存任务到数据库（状态为todo，assigned_agent为空）
 	session := &database.Session{
-		ID:            req.SessionID,
-		Username:      req.Username,
-		Title:         generateTitle(req.Content),
-		TaskType:      req.Task,
-		Content:       req.Content,
-		Params:        mustMarshalJSON(req.Params),
-		Attachments:   mustMarshalJSON(req.Attachments),
-		Status:        TaskStatusTodo,
-		AssignedAgent: "", // 预存时为空
-		ContryIsoCode: req.ContryIsoCode,
+		ID:             req.SessionID,
+		Username:       req.Username,
+		Title:          generateTitle(req.Content),
+		TaskType:       req.Task,
+		Content:        req.Content,
+		Params:         mustMarshalJSON(req.Params),
+		Attachments:    mustMarshalJSON(req.Attachments),
+		Status:         TaskStatusTodo,
+		AssignedAgent:  "", // 预存时为空
+		CountryIsoCode: req.CountryIsoCode,
 	}
 
 	err = tm.taskStore.CreateSession(session)
@@ -260,12 +260,13 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 	taskMsg := WSMessage{
 		Type: WSMsgTypeTaskAssign,
 		Content: TaskContent{
-			SessionID:   task.SessionID,
-			TaskType:    task.Task,
-			Content:     task.Content,
-			Params:      enhancedParams,
-			Attachments: task.Attachments,
-			Timeout:     3600,
+			SessionID:      task.SessionID,
+			TaskType:       task.Task,
+			Content:        task.Content,
+			Params:         enhancedParams,
+			Attachments:    task.Attachments,
+			Timeout:        3600,
+			CountryIsoCode: task.CountryIsoCode,
 		},
 	}
 
@@ -756,13 +757,22 @@ func (tm *TaskManager) GetUserTasks(username string, traceID string) ([]map[stri
 	var tasks []map[string]interface{}
 	for _, session := range sessions {
 		task := map[string]interface{}{
-			"sessionId":     session.ID,
-			"title":         session.Title,
-			"taskType":      session.TaskType,
-			"status":        session.Status,
-			"contryIsoCode": session.ContryIsoCode,
-			"updatedAt":     session.UpdatedAt, // 直接使用时间戳毫秒级
+			"sessionId":      session.ID,
+			"title":          session.Title,
+			"taskType":       session.TaskType,
+			"status":         session.Status,
+			"countryIsoCode": session.CountryIsoCode,
+			"updatedAt":      session.UpdatedAt, // 直接使用时间戳毫秒级
+			"createdAt":      session.CreatedAt, // 任务创建时间
 		}
+
+		// 添加完成时间（如果任务已完成）
+		if session.CompletedAt != nil {
+			task["completedAt"] = *session.CompletedAt
+		} else {
+			task["completedAt"] = nil
+		}
+
 		tasks = append(tasks, task)
 	}
 
@@ -887,13 +897,13 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 
 	// 构建返回数据
 	detail := map[string]interface{}{
-		"sessionId":     session.ID,
-		"name":          session.Title,
-		"status":        session.Status,
-		"contryIsoCode": session.ContryIsoCode,
-		"createdAt":     session.CreatedAt,
-		"files":         files,
-		"messages":      messageList,
+		"sessionId":      session.ID,
+		"name":           session.Title,
+		"status":         session.Status,
+		"countryIsoCode": session.CountryIsoCode,
+		"createdAt":      session.CreatedAt,
+		"files":          files,
+		"messages":       messageList,
 	}
 
 	log.Infof("获取任务详情成功: trace_id=%s, sessionId=%s, username=%s", traceID, sessionId, username)

@@ -18,20 +18,20 @@ type User struct {
 
 // Session 会话表（一个会话对应一个任务）
 type Session struct {
-	ID            string         `gorm:"primaryKey;column:id" json:"id"` // 会话ID，也是任务ID
-	Username      string         `gorm:"column:username;not null" json:"username"`
-	Title         string         `gorm:"column:title" json:"title"`
-	TaskType      string         `gorm:"column:task_type;not null" json:"task_type"`          // 任务类型
-	Content       string         `gorm:"column:content;not null" json:"content"`              // 任务内容
-	Params        datatypes.JSON `gorm:"column:params" json:"params"`                         // 任务参数
-	Attachments   datatypes.JSON `gorm:"column:attachments" json:"attachments"`               // 附件
-	Status        string         `gorm:"column:status;not null;default:'todo'" json:"status"` // todo, doing, done
-	AssignedAgent string         `gorm:"column:assigned_agent" json:"assigned_agent"`         // 分配的Agent
-	ContryIsoCode string         `gorm:"column:contry_iso_code" json:"contry_iso_code"`       // 标识语言
-	StartedAt     *int64         `gorm:"column:started_at" json:"started_at"`                 // 时间戳毫秒级
-	CompletedAt   *int64         `gorm:"column:completed_at" json:"completed_at"`             // 时间戳毫秒级
-	CreatedAt     int64          `gorm:"column:created_at;not null" json:"created_at"`        // 时间戳毫秒级
-	UpdatedAt     int64          `gorm:"column:updated_at;not null" json:"updated_at"`        // 时间戳毫秒级
+	ID             string         `gorm:"primaryKey;column:id" json:"id"` // 会话ID，也是任务ID
+	Username       string         `gorm:"column:username;not null" json:"username"`
+	Title          string         `gorm:"column:title" json:"title"`
+	TaskType       string         `gorm:"column:task_type;not null" json:"task_type"`          // 任务类型
+	Content        string         `gorm:"column:content;not null" json:"content"`              // 任务内容
+	Params         datatypes.JSON `gorm:"column:params" json:"params"`                         // 任务参数
+	Attachments    datatypes.JSON `gorm:"column:attachments" json:"attachments"`               // 附件
+	Status         string         `gorm:"column:status;not null;default:'todo'" json:"status"` // todo, doing, done
+	AssignedAgent  string         `gorm:"column:assigned_agent" json:"assigned_agent"`         // 分配的Agent
+	CountryIsoCode string         `gorm:"column:contry_iso_code" json:"countryIsoCode"`        // 标识语言
+	StartedAt      *int64         `gorm:"column:started_at" json:"started_at"`                 // 时间戳毫秒级
+	CompletedAt    *int64         `gorm:"column:completed_at" json:"completed_at"`             // 时间戳毫秒级
+	CreatedAt      int64          `gorm:"column:created_at;not null" json:"created_at"`        // 时间戳毫秒级
+	UpdatedAt      int64          `gorm:"column:updated_at;not null" json:"updated_at"`        // 时间戳毫秒级
 
 	// 关联关系
 	User     User          `gorm:"foreignKey:Username" json:"user"`
