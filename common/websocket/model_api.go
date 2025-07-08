@@ -64,12 +64,27 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 		return
 	}
 
+	// 转换为期望的返回格式
+	var result []map[string]interface{}
+	for _, model := range models {
+		item := map[string]interface{}{
+			"model_id": model.ModelID,
+			"model": map[string]interface{}{
+				"model":    model.ModelName,
+				"token":    model.Token,
+				"base_url": model.BaseURL,
+				"note":     model.Note,
+			},
+		}
+		result = append(result, item)
+	}
+
 	log.Infof("获取模型列表成功: trace_id=%s, username=%s, count=%d", traceID, username, len(models))
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
 		"message": "获取模型列表成功",
-		"data":    models,
+		"data":    result,
 	})
 }
 
@@ -117,10 +132,21 @@ func HandleGetModelDetail(c *gin.Context, mm *ModelManager) {
 
 	log.Infof("获取模型详情成功: trace_id=%s, modelID=%s, username=%s", traceID, modelID, username)
 
+	// 转换为期望的返回格式
+	result := map[string]interface{}{
+		"model_id": model.ModelID,
+		"model": map[string]interface{}{
+			"model":    model.ModelName,
+			"token":    model.Token,
+			"base_url": model.BaseURL,
+			"note":     model.Note,
+		},
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
 		"message": "获取模型详情成功",
-		"data":    model,
+		"data":    result,
 	})
 }
 
