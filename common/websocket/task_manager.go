@@ -679,8 +679,8 @@ func (tm *TaskManager) deleteSessionAttachments(session *database.Session) error
 
 // UploadFileResult 文件上传结果
 type UploadFileResult struct {
-	OriginalName string `json:"original_name"` // 原始文件名
-	FileURL      string `json:"file_url"`      // 文件访问URL
+	Filename string `json:"filename"` // 原始文件名
+	FileURL  string `json:"file_url"` // 文件访问URL
 }
 
 // UploadFile 上传文件
@@ -741,8 +741,8 @@ func (tm *TaskManager) UploadFile(file *multipart.FileHeader, traceID string) (*
 	log.Infof("文件上传成功: trace_id=%s, originalName=%s, secureName=%s, size=%d, fileURL=%s", traceID, originalName, fileName, written, fileURL)
 
 	return &UploadFileResult{
-		OriginalName: originalName,
-		FileURL:      fileURL,
+		Filename: originalName,
+		FileURL:  fileURL,
 	}, nil
 }
 
