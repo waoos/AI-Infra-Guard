@@ -164,8 +164,14 @@ func (am *AgentManager) HandleAgentWebSocket() gin.HandlerFunc {
 // handleConnection 处理单个连接的消息
 func (ac *AgentConnection) handleConnection(am *AgentManager) {
 	defer func() {
+		ac.stateMu.RLock()
+		agentID := ac.agentID
+		remoteAddr := ac.conn.RemoteAddr().String()
+		ac.stateMu.RUnlock()
+
 		ac.cleanup(am)
-		log.Infof("Agent连接已断开: agentId=%s, remoteAddr=%s", ac.agentID, ac.conn.RemoteAddr().String())
+		log.Infof("Agent连接处理结束: agentId=%s, remoteAddr=%s", agentID, remoteAddr)
+		gologger.Infof("Agent连接处理结束: agentId=%s, remoteAddr=%s", agentID, remoteAddr)
 	}()
 
 	// 设置连接参数
@@ -183,8 +189,16 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 	for {
 		_, message, err := ac.conn.ReadMessage()
 		if err != nil {
+			ac.stateMu.RLock()
+			agentID := ac.agentID
+			ac.stateMu.RUnlock()
+
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Errorf("Agent连接异常断开: agentId=%s, error=%v", ac.agentID, err)
+				log.Errorf("Agent连接异常断开: agentId=%s, error=%v", agentID, err)
+				gologger.Errorf("Agent连接异常断开: agentId=%s, error=%v", agentID, err)
+			} else {
+				log.Infof("Agent连接正常断开: agentId=%s, closeCode=%v", agentID, err)
+				gologger.Infof("Agent连接正常断开: agentId=%s, closeCode=%v", agentID, err)
 			}
 			break
 		}
@@ -335,14 +349,20 @@ func (ac *AgentConnection) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
+		log.Infof("Agent心跳检测已停止: agentId=%s", ac.agentID)
 	}()
+
+	log.Infof("Agent心跳检测已启动: agentId=%s, pingPeriod=%v", ac.agentID, pingPeriod)
 
 	for range ticker.C {
 		ac.stateMu.RLock()
 		if !ac.isActive {
 			ac.stateMu.RUnlock()
+			log.Infof("Agent连接已标记为非活跃,停止心跳检测: agentId=%s", ac.agentID)
 			return
 		}
+		agentID := ac.agentID
+		ac.stateMu.RUnlock()
 
 		// 设置写超时
 		ac.conn.SetWriteDeadline(time.Now().Add(writeWait))
@@ -350,27 +370,39 @@ func (ac *AgentConnection) writePump() {
 		// 尝试发送ping消息
 		err := ac.conn.WriteMessage(websocket.PingMessage, nil)
 		if err != nil {
-			ac.stateMu.RUnlock()
+			log.Warnf("Agent心跳发送失败,准备重试: agentId=%s, error=%v", agentID, err)
+			gologger.Warnf("Agent心跳发送失败,准备重试: agentId=%s, error=%v", agentID, err)
 
 			// 尝试重试一次
 			time.Sleep(1 * time.Second)
 			ac.stateMu.RLock()
 			if !ac.isActive {
 				ac.stateMu.RUnlock()
+				log.Infof("Agent连接在重试期间已标记为非活跃: agentId=%s", agentID)
 				return
 			}
+			ac.stateMu.RUnlock()
+
 			ac.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			err = ac.conn.WriteMessage(websocket.PingMessage, nil)
 			if err != nil {
-				ac.stateMu.RUnlock()
+				log.Errorf("Agent心跳重试失败,连接已失效: agentId=%s, error=%v", agentID, err)
+				gologger.Errorf("Agent心跳重试失败,连接已失效: agentId=%s, error=%v", agentID, err)
+
+				// 标记连接为非活跃
 				ac.stateMu.Lock()
 				ac.isActive = false
 				ac.stateMu.Unlock()
-				return
-			}
-		}
 
-		ac.stateMu.RUnlock()
+				log.Errorf("Agent连接已标记为失效: agentId=%s, 原因=心跳失败", agentID)
+				gologger.Errorf("Agent连接已标记为失效: agentId=%s, 原因=心跳失败", agentID)
+				return
+			} else {
+				log.Infof("Agent心跳重试成功: agentId=%s", agentID)
+			}
+		} else {
+			log.Debugf("Agent心跳发送成功: agentId=%s", agentID)
+		}
 	}
 }
 
@@ -378,20 +410,40 @@ func (ac *AgentConnection) writePump() {
 func (ac *AgentConnection) cleanup(am *AgentManager) {
 	ac.stateMu.Lock()
 	agentID := ac.agentID
+	wasActive := ac.isActive
+	ac.isActive = false
 	ac.stateMu.Unlock()
+
+	log.Infof("开始清理Agent连接: agentId=%s, wasActive=%v", agentID, wasActive)
+	gologger.Infof("开始清理Agent连接: agentId=%s, wasActive=%v", agentID, wasActive)
 
 	if agentID != "" {
 		am.mu.Lock()
-		delete(am.connections, agentID)
+		// 检查是否真的存在于连接管理器中
+		if _, exists := am.connections[agentID]; exists {
+			delete(am.connections, agentID)
+			log.Infof("Agent已从连接管理器中移除: agentId=%s", agentID)
+			gologger.Infof("Agent已从连接管理器中移除: agentId=%s", agentID)
+		} else {
+			log.Warnf("Agent不在连接管理器中，可能已被移除: agentId=%s", agentID)
+		}
 		am.mu.Unlock()
 
 		// ac.store.UpdateOnlineStatus(ac.agentID, false)
+	} else {
+		log.Warnf("清理未注册的Agent连接: remoteAddr=%s", ac.conn.RemoteAddr().String())
 	}
 
-	ac.stateMu.Lock()
-	ac.isActive = false
-	ac.stateMu.Unlock()
-	ac.conn.Close()
+	// 关闭WebSocket连接
+	err := ac.conn.Close()
+	if err != nil {
+		log.Warnf("关闭Agent连接时出错: agentId=%s, error=%v", agentID, err)
+	} else {
+		log.Infof("Agent连接已关闭: agentId=%s", agentID)
+	}
+
+	log.Infof("Agent连接清理完成: agentId=%s", agentID)
+	gologger.Infof("Agent连接清理完成: agentId=%s", agentID)
 }
 
 // sendError 发送错误响应
