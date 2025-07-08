@@ -866,14 +866,14 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 	}
 
 	// 处理附件信息
-	var files []map[string]interface{}
+	var attachments []map[string]interface{}
 	if session.Attachments != nil {
 		var attachmentURLs []string
 		if err := json.Unmarshal(session.Attachments, &attachmentURLs); err == nil {
 			for _, url := range attachmentURLs {
 				// 从URL中提取文件名
 				fileName := tm.extractFileNameFromURL(url)
-				files = append(files, map[string]interface{}{
+				attachments = append(attachments, map[string]interface{}{
 					"filename": fileName,
 					"fileUrl":  url,
 				})
@@ -902,11 +902,11 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 	// 构建返回数据
 	detail := map[string]interface{}{
 		"sessionId":      session.ID,
-		"name":           session.Title,
+		"title":          session.Title,
 		"status":         session.Status,
 		"countryIsoCode": session.CountryIsoCode,
 		"createdAt":      session.CreatedAt,
-		"files":          files,
+		"attachments":    attachments,
 		"messages":       messageList,
 	}
 
