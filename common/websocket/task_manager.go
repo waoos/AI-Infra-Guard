@@ -86,7 +86,7 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 		Content:        req.Content,
 		Params:         mustMarshalJSON(req.Params),
 		Attachments:    mustMarshalJSON(req.Attachments),
-		Status:         TaskStatusTodo,
+		Status:         TaskStatusDoing,
 		AssignedAgent:  "", // 预存时为空
 		CountryIsoCode: req.CountryIsoCode,
 	}
