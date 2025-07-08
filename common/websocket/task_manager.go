@@ -170,7 +170,7 @@ func (tm *TaskManager) GetTask(sessionId string) (*TaskCreateRequest, bool) {
 	return task, ok
 }
 
-// 新增：任务分发方法
+// 新增：任务分发方法（简化版本，减少死锁风险）
 func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 	log.Infof("开始分发任务: trace_id=%s, sessionId=%s", traceID, sessionId)
 
@@ -182,7 +182,7 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 		return fmt.Errorf("任务不存在")
 	}
 
-	// 2. 获取可用 Agent
+	// 2. 获取可用 Agent（简化：不做额外健康检查）
 	availableAgents := tm.agentManager.GetAvailableAgents()
 	if len(availableAgents) == 0 {
 		log.Warnf("没有可用的Agent: trace_id=%s, sessionId=%s", traceID, sessionId)
@@ -192,30 +192,10 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 
 	log.Infof("找到可用Agent数量: trace_id=%s, sessionId=%s, count=%d", traceID, sessionId, len(availableAgents))
 
-	// 3. 选择 Agent（简单策略）
+	// 3. 选择 Agent（简单策略：选择第一个，相信GetAvailableAgents的过滤结果）
 	selectedAgent := availableAgents[0]
 
-	// 4. 检查连接健康状态
-	if !selectedAgent.IsConnectionHealthy() {
-		log.Warnf("首选Agent连接不健康，尝试其他Agent: trace_id=%s, sessionId=%s, agentId=%s", traceID, sessionId, selectedAgent.agentID)
-		// 如果连接不健康，尝试其他 Agent
-		for _, agent := range availableAgents[1:] {
-			if agent.IsConnectionHealthy() {
-				selectedAgent = agent
-				log.Infof("选择备用Agent: trace_id=%s, sessionId=%s, agentId=%s", traceID, sessionId, selectedAgent.agentID)
-				break
-			}
-		}
-
-		// 如果所有 Agent 都不健康，记录错误并返回
-		if !selectedAgent.IsConnectionHealthy() {
-			log.Errorf("所有agent连接都异常: trace_id=%s, sessionId=%s", traceID, sessionId)
-			gologger.Errorf("所有agent连接都异常 for sessionId: %s", sessionId)
-			return fmt.Errorf("所有agent连接都异常")
-		}
-	}
-
-	// 5. 更新session的assigned_agent和开始时间
+	// 4. 更新session的assigned_agent和开始时间
 	err := tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, selectedAgent.agentID)
 	if err != nil {
 		log.Errorf("无法更新session的assigned_agent: trace_id=%s, sessionId=%s, agentId=%s, error=%v", traceID, task.SessionID, selectedAgent.agentID, err)
@@ -223,7 +203,7 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 		return fmt.Errorf("无法更新session的assigned_agent")
 	}
 
-	// 6. 处理params中的modelid，获取模型信息
+	// 5. 处理params中的modelid，获取模型信息
 	enhancedParams := task.Params
 	if task.Params != nil {
 		if modelID, exists := task.Params["model_id"]; exists {
@@ -256,7 +236,7 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 		}
 	}
 
-	// 7. 构造任务分配消息
+	// 6. 构造任务分配消息
 	taskMsg := WSMessage{
 		Type: WSMsgTypeTaskAssign,
 		Content: TaskContent{
@@ -270,18 +250,32 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 		},
 	}
 
-	// 7. 使用重试机制发送给 Agent（设置较短的超时时间）
-	err = selectedAgent.SendMessageWithRetry(taskMsg, 1) // 只重试1次，减少等待时间
-	if err != nil {
-		log.Errorf("下发任务给Agent失败: trace_id=%s, sessionId=%s, agentId=%s, error=%v", traceID, task.SessionID, selectedAgent.agentID, err)
-		gologger.Errorf("下发任务给 %s 失败: %v", selectedAgent.agentID, err)
-		// 如果发送失败，重置assigned_agent
+	// 7. 直接发送给 Agent（简化：无重试，无额外健康检查）
+	selectedAgent.stateMu.RLock()
+	agentID := selectedAgent.agentID
+	isActive := selectedAgent.isActive
+	selectedAgent.stateMu.RUnlock()
+
+	if !isActive {
+		log.Errorf("选中的Agent已不活跃: trace_id=%s, sessionId=%s, agentId=%s", traceID, sessionId, agentID)
+		// 重置assigned_agent
 		tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, "")
-		return fmt.Errorf("下发任务给 %s 失败: %v", selectedAgent.agentID, err)
+		return fmt.Errorf("选中的Agent已不活跃: %s", agentID)
 	}
 
-	log.Infof("任务分发成功: trace_id=%s, sessionId=%s, agentId=%s", traceID, task.SessionID, selectedAgent.agentID)
-	gologger.Infof("任务下发成功: sessionId=%s, agentId=%s", task.SessionID, selectedAgent.agentID)
+	// 设置写超时并直接发送
+	selectedAgent.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	err = selectedAgent.conn.WriteJSON(taskMsg)
+	if err != nil {
+		log.Errorf("下发任务给Agent失败: trace_id=%s, sessionId=%s, agentId=%s, error=%v", traceID, task.SessionID, agentID, err)
+		gologger.Errorf("下发任务给 %s 失败: %v", agentID, err)
+		// 如果发送失败，重置assigned_agent
+		tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, "")
+		return fmt.Errorf("下发任务给 %s 失败: %v", agentID, err)
+	}
+
+	log.Infof("任务分发成功: trace_id=%s, sessionId=%s, agentId=%s", traceID, task.SessionID, agentID)
+	gologger.Infof("任务下发成功: sessionId=%s, agentId=%s", task.SessionID, agentID)
 	return nil
 }
 
@@ -508,32 +502,42 @@ func (tm *TaskManager) TerminateTask(sessionId string, username string, traceID 
 	return nil
 }
 
-// notifyAgentToTerminate 通知 Agent 终止任务
+// notifyAgentToTerminate 通知 Agent 终止任务（简化版本）
 func (tm *TaskManager) notifyAgentToTerminate(agentID string, sessionId string, traceID string) {
-	// 获取 Agent 连接
-	availableAgents := tm.agentManager.GetAvailableAgents()
-	for _, agent := range availableAgents {
-		if agent.agentID == agentID {
-			// 发送终止消息给 Agent
-			terminateMsg := WSMessage{
-				Type: "terminate",
-				Content: map[string]interface{}{
-					"session_id": sessionId,
-					"reason":     "用户主动终止",
-				},
+	// 异步通知Agent，避免阻塞
+	go func() {
+		// 获取 Agent 连接
+		availableAgents := tm.agentManager.GetAvailableAgents()
+		for _, agent := range availableAgents {
+			agent.stateMu.RLock()
+			currentAgentID := agent.agentID
+			isActive := agent.isActive
+			agent.stateMu.RUnlock()
+
+			if currentAgentID == agentID && isActive {
+				// 发送终止消息给 Agent
+				terminateMsg := WSMessage{
+					Type: "terminate",
+					Content: map[string]interface{}{
+						"session_id": sessionId,
+						"reason":     "用户主动终止",
+					},
+				}
+
+				// 直接发送，无重试机制
+				agent.conn.SetWriteDeadline(time.Now().Add(writeWait))
+				err := agent.conn.WriteJSON(terminateMsg)
+				if err != nil {
+					log.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
+					gologger.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
+				} else {
+					log.Infof("终止消息已发送给Agent %s: trace_id=%s, sessionId=%s", agentID, traceID, sessionId)
+					gologger.Infof("终止消息已发送给Agent %s: trace_id=%s, sessionId=%s", agentID, traceID, sessionId)
+				}
+				break
 			}
-			// 使用SendMessageWithRetry方法，避免直接访问conn
-			err := agent.SendMessageWithRetry(terminateMsg, 3)
-			if err != nil {
-				log.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
-				gologger.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
-			} else {
-				log.Infof("终止消息已发送给Agent %s: trace_id=%s, sessionId=%s", agentID, traceID, sessionId)
-				gologger.Infof("终止消息已发送给Agent %s: trace_id=%s, sessionId=%s", agentID, traceID, sessionId)
-			}
-			break
 		}
-	}
+	}()
 }
 
 // sendTerminationEvent 发送终止事件给前端
