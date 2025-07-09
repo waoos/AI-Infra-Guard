@@ -103,18 +103,10 @@ type ActionLogEvent struct {
 
 // resultUpdate 事件体（任务完成结果）
 type ResultUpdateEvent struct {
-	ID        string     `json:"id" validate:"required"`        // 事件ID - 必需
-	Type      string     `json:"type" validate:"required"`      // 事件类型 - 必需
-	Timestamp int64      `json:"timestamp" validate:"required"` // 时间戳 - 必需
-	Result    ResultInfo `json:"result" validate:"required"`    // 结果信息 - 必需
-}
-
-// 结果信息
-type ResultInfo struct {
-	Brief       string `json:"brief" validate:"required"` // 简短描述 - 必需
-	Description string `json:"description,omitempty"`     // 详细描述 - 可选
-	FileName    string `json:"fileName,omitempty"`        // 文件名 - 可选
-	FileURL     string `json:"fileUrl,omitempty"`         // 文件访问URL - 可选
+	ID        string      `json:"id" validate:"required"`        // 事件ID - 必需
+	Type      string      `json:"type" validate:"required"`      // 事件类型 - 必需
+	Timestamp int64       `json:"timestamp" validate:"required"` // 时间戳 - 必需
+	Result    interface{} `json:"result" validate:"required"`    // 结果信息 - 必需（不同任务类型结果字段各不相同）
 }
 
 // 任务分配消息（Server -> Agent）

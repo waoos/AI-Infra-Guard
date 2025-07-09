@@ -333,10 +333,9 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 		}
 	case "resultUpdate":
 		if convertedEvent, err := convertToStruct(event, &ResultUpdateEvent{}); err == nil {
-			if resultUpdateEvent, ok := convertedEvent.(*ResultUpdateEvent); ok {
-				log.Infof("任务完成: sessionId=%s, fileName=%s", sessionId, resultUpdateEvent.Result.FileName)
-				gologger.Debugf("resultUpdate事件详情: sessionId=%s, fileName=%s",
-					sessionId, resultUpdateEvent.Result.FileName)
+			if _, ok := convertedEvent.(*ResultUpdateEvent); ok {
+				log.Infof("任务完成: sessionId=%s", sessionId)
+				gologger.Debugf("resultUpdate事件详情: sessionId=%s", sessionId)
 
 				// 获取任务信息用于监控
 				task, exists := tm.GetTask(sessionId)
@@ -899,6 +898,18 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 		})
 	}
 
+	// 处理任务参数
+	var params map[string]interface{}
+	if session.Params != nil {
+		if err := json.Unmarshal(session.Params, &params); err != nil {
+			gologger.Warnf("解析任务参数失败: trace_id=%s, sessionId=%s, error=%v", traceID, sessionId, err)
+			log.Warnf("解析任务参数失败: trace_id=%s, sessionId=%s, error=%v", traceID, sessionId, err)
+			params = make(map[string]interface{})
+		}
+	} else {
+		params = make(map[string]interface{})
+	}
+
 	// 构建返回数据
 	detail := map[string]interface{}{
 		"sessionId":      session.ID,
@@ -906,6 +917,9 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 		"status":         session.Status,
 		"countryIsoCode": session.CountryIsoCode,
 		"createdAt":      session.CreatedAt,
+		"content":        session.Content,
+		"params":         params,
+		"task":           session.TaskType,
 		"attachments":    attachments,
 		"messages":       messageList,
 	}
