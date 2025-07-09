@@ -919,7 +919,7 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 		"createdAt":      session.CreatedAt,
 		"content":        session.Content,
 		"params":         params,
-		"task":           session.TaskType,
+		"taskType":       session.TaskType,
 		"attachments":    attachments,
 		"messages":       messageList,
 	}
