@@ -679,7 +679,7 @@ func (tm *TaskManager) deleteSessionAttachments(session *database.Session) error
 // UploadFileResult 文件上传结果
 type UploadFileResult struct {
 	Filename string `json:"filename"` // 原始文件名
-	FileURL  string `json:"file_url"` // 文件访问URL
+	FileURL  string `json:"fileUrl"`  // 文件访问URL
 }
 
 // UploadFile 上传文件
