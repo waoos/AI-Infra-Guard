@@ -249,6 +249,7 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 			CountryIsoCode: task.CountryIsoCode,
 		},
 	}
+	log.Infof("任务分配消息: trace_id=%s, sessionId=%s, taskMsg=%+v", traceID, sessionId, taskMsg)
 
 	// 7. 直接发送给 Agent（简化：无重试，无额外健康检查）
 	selectedAgent.stateMu.RLock()
