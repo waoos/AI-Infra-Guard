@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"net/http"
+	"sort"
 
 	"git.code.oa.com/trpc-go/trpc-go/log"
 	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
@@ -52,10 +53,10 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 
 	log.Infof("用户请求获取模型列表: trace_id=%s, username=%s", traceID, username)
 
-	// 获取用户的模型列表（只返回该用户创建的模型）
-	models, err := mm.modelStore.GetUserModels(username)
+	// 获取用户自己的模型
+	userModels, err := mm.modelStore.GetUserModels(username)
 	if err != nil {
-		log.Errorf("获取模型列表失败: trace_id=%s, username=%s, error=%v", traceID, username, err)
+		log.Errorf("获取用户模型列表失败: trace_id=%s, username=%s, error=%v", traceID, username, err)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
 			"message": "获取模型列表失败: " + err.Error(),
@@ -64,14 +65,37 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 		return
 	}
 
+	// 获取public_user的模型
+	publicModels, err := mm.modelStore.GetUserModels("public_user")
+	if err != nil {
+		log.Errorf("获取公共模型列表失败: trace_id=%s, username=%s, error=%v", traceID, username, err)
+		// 公共模型获取失败不影响主流程，只记录警告
+		log.Warnf("获取public_user模型失败，继续返回用户模型: %v", err)
+		publicModels = []*database.Model{}
+	}
+
+	// 合并模型列表
+	allModels := append(userModels, publicModels...)
+
+	// 按创建时间降序排序（最新的在前面）
+	sort.Slice(allModels, func(i, j int) bool {
+		return allModels[i].CreatedAt > allModels[j].CreatedAt
+	})
+
 	// 转换为期望的返回格式
 	var result []map[string]interface{}
-	for _, model := range models {
+	for _, model := range allModels {
+		// 对于public_user的模型，将token置空
+		token := model.Token
+		if model.Username == "public_user" {
+			token = ""
+		}
+
 		item := map[string]interface{}{
 			"model_id": model.ModelID,
 			"model": map[string]interface{}{
 				"model":    model.ModelName,
-				"token":    model.Token,
+				"token":    token,
 				"base_url": model.BaseURL,
 				"note":     model.Note,
 			},
@@ -79,7 +103,8 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 		result = append(result, item)
 	}
 
-	log.Infof("获取模型列表成功: trace_id=%s, username=%s, count=%d", traceID, username, len(models))
+	log.Infof("获取模型列表成功: trace_id=%s, username=%s, userModels=%d, publicModels=%d, total=%d",
+		traceID, username, len(userModels), len(publicModels), len(result))
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
