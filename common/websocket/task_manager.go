@@ -794,6 +794,28 @@ func generateTitle(content string) string {
 	return content
 }
 
+// generateTaskTitle 生成任务标题（用于任务创建API）
+func (tm *TaskManager) generateTaskTitle(content string, attachments []string) string {
+	// 如果content不为空，使用content作为title（截取前50个字符）
+	if strings.TrimSpace(content) != "" {
+		// 使用rune来正确处理UTF-8字符，避免截断中文字符
+		runes := []rune(content)
+		if len(runes) > 50 {
+			return string(runes[:50])
+		}
+		return content
+	}
+
+	// 如果content为空，尝试从附件中提取第一个URL的文件名作为title
+	if len(attachments) > 0 && attachments[0] != "" {
+		// 直接调用现有的extractFileNameFromURL方法
+		return tm.extractFileNameFromURL(attachments[0])
+	}
+
+	// 如果都没有，返回默认标题
+	return "新任务"
+}
+
 // 辅助函数：将interface{}转换为datatypes.JSON
 func mustMarshalJSON(v interface{}) datatypes.JSON {
 	if v == nil {
