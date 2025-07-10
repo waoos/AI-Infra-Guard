@@ -166,6 +166,7 @@ func HandleTaskSSE(c *gin.Context, tm *TaskManager) {
 func HandleTaskCreate(c *gin.Context, tm *TaskManager) {
 	traceID := getTraceID(c)
 	var req TaskCreateRequest
+	log.Infof("开始创建任务: trace_id=%s, req=%+v", traceID, req)
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,
@@ -207,12 +208,15 @@ func HandleTaskCreate(c *gin.Context, tm *TaskManager) {
 
 	log.Infof("任务创建成功: trace_id=%s, sessionId=%s, username=%s", traceID, req.SessionID, username)
 
+	// 生成任务标题
+	title := tm.generateTaskTitle(req.Content, req.Attachments)
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
 		"message": "任务创建成功",
 		"data": gin.H{
 			"sessionId": req.SessionID,
-			"title":     generateTitle(req.Content),
+			"title":     title,
 		},
 	})
 }
