@@ -210,7 +210,10 @@ func HandleTaskCreate(c *gin.Context, tm *TaskManager) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  0,
 		"message": "任务创建成功",
-		"data":    nil,
+		"data": gin.H{
+			"sessionId": req.SessionID,
+			"title":     generateTitle(req.Content),
+		},
 	})
 }
 
