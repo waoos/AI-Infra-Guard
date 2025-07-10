@@ -81,7 +81,7 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 	session := &database.Session{
 		ID:             req.SessionID,
 		Username:       req.Username,
-		Title:          generateTitle(req.Content),
+		Title:          tm.generateTaskTitle(req.Content, req.Attachments),
 		TaskType:       req.Task,
 		Content:        req.Content,
 		Params:         mustMarshalJSON(req.Params),
