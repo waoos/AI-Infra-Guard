@@ -42,6 +42,7 @@ type PlanUpdateEvent struct {
 }
 
 type PlanTaskItem struct {
+	StepID    string `json:"stepId" validate:"required"`    // 步骤ID - 必需
 	Status    string `json:"status" validate:"required"`    // 任务状态 - 必需
 	Title     string `json:"title" validate:"required"`     // 任务标题 - 必需
 	StartedAt int64  `json:"startedAt" validate:"required"` // 开始时间 - 必需
