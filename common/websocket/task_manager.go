@@ -207,12 +207,17 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 	enhancedParams := task.Params
 	if task.Params != nil {
 		if modelID, exists := task.Params["model_id"]; exists {
-			if modelIDStr, ok := modelID.(string); ok && modelIDStr != "" {
+			if modelIDStr, ok := modelID.(string); ok && strings.TrimSpace(modelIDStr) != "" {
 				log.Infof("处理模型ID: trace_id=%s, sessionId=%s, modelID=%s", traceID, sessionId, modelIDStr)
 
 				// 从数据库获取模型信息
 				model, err := tm.modelStore.GetModel(modelIDStr)
 				if err != nil {
+					// 检查是否是记录不存在的错误
+					if err.Error() == "record not found" {
+						log.Errorf("模型不存在: trace_id=%s, sessionId=%s, modelID=%s", traceID, sessionId, modelIDStr)
+						return fmt.Errorf("模型ID '%s' 不存在，请检查模型配置", modelIDStr)
+					}
 					log.Errorf("获取模型信息失败: trace_id=%s, sessionId=%s, modelID=%s, error=%v", traceID, sessionId, modelIDStr, err)
 					return fmt.Errorf("获取模型信息失败: %v", err)
 				}
@@ -232,8 +237,14 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 				enhancedParams["model"] = modelInfo
 
 				log.Infof("模型信息已添加到params: trace_id=%s, sessionId=%s, modelID=%s", traceID, sessionId, modelIDStr)
+			} else {
+				log.Debugf("模型ID为空，跳过模型信息查询: trace_id=%s, sessionId=%s", traceID, sessionId)
 			}
+		} else {
+			log.Debugf("params中无model_id字段，跳过模型信息查询: trace_id=%s, sessionId=%s", traceID, sessionId)
 		}
+	} else {
+		log.Debugf("params为空，跳过模型信息查询: trace_id=%s, sessionId=%s", traceID, sessionId)
 	}
 
 	// 6. 构造任务分配消息
