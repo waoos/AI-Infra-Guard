@@ -33,6 +33,7 @@ func RunWebServer(options *options.Options) {
 
 	// 2. 添加中间件
 	r.Use(middleware.TrpcMiddleware())
+	r.Use(middleware.RequestLoggerMiddleware()) // 添加请求参数日志中间件
 	// r.Use(middleware.MetricsMiddleware()) // 移除HTTP监控中间件，依赖TRPC自动监控
 
 	// 3. 初始化数据库和Agentmanager
