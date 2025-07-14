@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"net/http"
-	"sort"
 
 	"git.code.oa.com/trpc-go/trpc-go/log"
 	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
@@ -53,20 +52,12 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 
 	log.Infof("用户请求获取模型列表: trace_id=%s, username=%s", traceID, username)
 
-	// 获取用户自己的模型
-	userModels, err := mm.modelStore.GetUserModels(username)
-	if err != nil {
-		log.Errorf("获取用户模型列表失败: trace_id=%s, username=%s, error=%v", traceID, username, err)
-		c.JSON(http.StatusOK, gin.H{
-			"status":  1,
-			"message": "获取模型列表失败: " + err.Error(),
-			"data":    nil,
-		})
-		return
-	}
+	var userModels []*database.Model
+	var publicModels []*database.Model
+	var err error
 
-	// 获取public_user的模型
-	publicModels, err := mm.modelStore.GetUserModels("public_user")
+	// 获取public_user的模型（系统模型）
+	publicModels, err = mm.modelStore.GetUserModels("public_user")
 	if err != nil {
 		log.Errorf("获取公共模型列表失败: trace_id=%s, username=%s, error=%v", traceID, username, err)
 		// 公共模型获取失败不影响主流程，只记录警告
@@ -74,28 +65,44 @@ func HandleGetModelList(c *gin.Context, mm *ModelManager) {
 		publicModels = []*database.Model{}
 	}
 
-	// 合并模型列表
-	allModels := append(userModels, publicModels...)
-
-	// 按创建时间降序排序（最新的在前面）
-	sort.Slice(allModels, func(i, j int) bool {
-		return allModels[i].CreatedAt > allModels[j].CreatedAt
-	})
+	// 如果不是public_user，才获取用户自己的模型
+	if username != "public_user" {
+		userModels, err = mm.modelStore.GetUserModels(username)
+		if err != nil {
+			log.Errorf("获取用户模型列表失败: trace_id=%s, username=%s, error=%v", traceID, username, err)
+			c.JSON(http.StatusOK, gin.H{
+				"status":  1,
+				"message": "获取模型列表失败: " + err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+	}
 
 	// 转换为期望的返回格式
 	var result []map[string]interface{}
-	for _, model := range allModels {
-		// 对于public_user的模型，将token置空
-		token := model.Token
-		if model.Username == "public_user" {
-			token = ""
-		}
 
+	// 1. 首先添加系统模型（public_user的模型），永远排在前面
+	for _, model := range publicModels {
 		item := map[string]interface{}{
 			"model_id": model.ModelID,
 			"model": map[string]interface{}{
 				"model":    model.ModelName,
-				"token":    token,
+				"token":    "", // 系统模型token置空
+				"base_url": model.BaseURL,
+				"note":     model.Note,
+			},
+		}
+		result = append(result, item)
+	}
+
+	// 2. 然后添加用户自己的模型
+	for _, model := range userModels {
+		item := map[string]interface{}{
+			"model_id": model.ModelID,
+			"model": map[string]interface{}{
+				"model":    model.ModelName,
+				"token":    model.Token, // 用户模型保留token
 				"base_url": model.BaseURL,
 				"note":     model.Note,
 			},

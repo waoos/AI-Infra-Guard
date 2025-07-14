@@ -579,12 +579,6 @@ func HandleDownloadFile(c *gin.Context, tm *TaskManager) {
 				"message": "任务不存在",
 				"data":    nil,
 			})
-		case "无权限访问此任务":
-			c.JSON(http.StatusForbidden, gin.H{
-				"status":  1,
-				"message": "无权限访问此任务",
-				"data":    nil,
-			})
 		case "文件不存在于此任务中":
 			c.JSON(http.StatusNotFound, gin.H{
 				"status":  1,

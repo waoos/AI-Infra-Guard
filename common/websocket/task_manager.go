@@ -987,12 +987,6 @@ func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username s
 		return fmt.Errorf("任务不存在")
 	}
 
-	// 2. 验证用户权限（只有任务创建者才能下载文件）
-	if session.Username != username {
-		log.Warnf("用户权限验证失败: trace_id=%s, sessionId=%s, requestUser=%s, owner=%s", traceID, sessionId, username, session.Username)
-		return fmt.Errorf("无权限访问此任务")
-	}
-
 	// 3. 验证文件URL是否属于该任务
 	if session.Attachments == nil {
 		log.Errorf("任务无附件: trace_id=%s, sessionId=%s", traceID, sessionId)
