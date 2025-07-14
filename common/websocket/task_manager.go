@@ -17,7 +17,6 @@ import (
 
 	"git.code.oa.com/trpc-go/trpc-go/log"
 	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
-	"github.com/Tencent/AI-Infra-Guard/common/monitoring"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
@@ -67,8 +66,7 @@ func NewTaskManager(agentManager *AgentManager, taskStore *database.TaskStore, m
 func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 	log.Infof("开始添加任务: trace_id=%s, sessionId=%s, taskType=%s, username=%s", traceID, req.SessionID, req.Task, req.Username)
 
-	// 开始任务监控（记录开始时间）
-	monitoring.StartTaskMonitoring(req.SessionID)
+	// 监控相关代码已移除
 
 	// 1. 先检查数据库中是否已存在相同的sessionId
 	existingSession, err := tm.taskStore.GetSession(req.SessionID)
@@ -129,8 +127,7 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 		log.Errorf("任务分发失败: trace_id=%s, sessionId=%s, error=%v", traceID, req.SessionID, err)
 		gologger.Errorf("任务分发失败: %v", err)
 
-		// 上报任务创建失败监控
-		monitoring.EndTaskCreationMonitoring(req.Task, "failed", req.SessionID)
+		// 监控相关代码已移除
 
 		return fmt.Errorf("任务分发失败: %v", err)
 	}
@@ -138,8 +135,7 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 	log.Infof("任务添加成功: trace_id=%s, sessionId=%s, taskType=%s", traceID, req.SessionID, req.Task)
 	gologger.Infof("任务添加成功: sessionId=%s, taskType=%s", req.SessionID, req.Task)
 
-	// 上报任务创建成功监控
-	monitoring.EndTaskCreationMonitoring(req.Task, "created", req.SessionID)
+	// 监控相关代码已移除
 
 	return nil
 }
@@ -349,12 +345,7 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 				log.Infof("任务完成: sessionId=%s", sessionId)
 				gologger.Debugf("resultUpdate事件详情: sessionId=%s", sessionId)
 
-				// 获取任务信息用于监控
-				task, exists := tm.GetTask(sessionId)
-				if exists {
-					// 上报任务完成监控
-					monitoring.EndTaskMonitoring(task.Task, "completed", sessionId)
-				}
+				// 监控相关代码已移除
 
 				// 更新任务状态为已完成
 				err := tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusDone)
@@ -504,8 +495,7 @@ func (tm *TaskManager) TerminateTask(sessionId string, username string, traceID 
 
 	log.Infof("任务终止完成: trace_id=%s, sessionId=%s", traceID, sessionId)
 
-	// 上报任务终止监控
-	monitoring.EndTaskMonitoring(session.TaskType, "terminated", sessionId)
+	// 监控相关代码已移除
 
 	// 异步清理任务资源
 	go tm.cleanupTask(sessionId)
@@ -793,16 +783,6 @@ func (tm *TaskManager) GetUserTasks(username string, traceID string) ([]map[stri
 
 	log.Infof("获取用户任务列表成功: trace_id=%s, username=%s, taskCount=%d", traceID, username, len(tasks))
 	return tasks, nil
-}
-
-// 辅助函数：生成任务标题
-func generateTitle(content string) string {
-	// 使用rune来正确处理UTF-8字符，避免截断中文字符
-	runes := []rune(content)
-	if len(runes) > 50 {
-		return string(runes[:50])
-	}
-	return content
 }
 
 // generateTaskTitle 生成任务标题（用于任务创建API）

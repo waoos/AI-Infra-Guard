@@ -6,9 +6,7 @@ import (
 	"path/filepath"
 
 	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-go/metrics"
 	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
-	_ "git.code.oa.com/trpc-go/trpc-metrics-zhiyan"
 	"github.com/Tencent/AI-Infra-Guard/common/middleware"
 	"github.com/Tencent/AI-Infra-Guard/common/trpc"
 	"github.com/Tencent/AI-Infra-Guard/internal/gologger"

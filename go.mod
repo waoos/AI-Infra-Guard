@@ -5,10 +5,10 @@ go 1.23.2
 require (
 	git.code.oa.com/trpc-go/trpc-go v0.20.0
 	git.code.oa.com/trpc-go/trpc-log-zhiyan v0.1.3
-	git.code.oa.com/trpc-go/trpc-metrics-zhiyan v0.3.11
 	github.com/PuerkitoBio/goquery v1.10.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/glebarez/sqlite v1.11.0
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/go-version v1.7.0
 	github.com/liushuochen/gotable v0.0.0-20221119160816-1113793e7092
@@ -36,11 +36,7 @@ require (
 require (
 	git.code.oa.com/polaris/polaris-go v0.9.6 // indirect
 	git.code.oa.com/zhiyan-log/sdk-go v0.1.10 // indirect
-	git.woa.com/trpc-go/trpc-metrics-zhiyan/v2 v2.1.5 // indirect
-	git.woa.com/zhiyan-monitor/sdk/go-sdk/v3 v3.3.6 // indirect
-	git.woa.com/zhiyan-monitor/t-digest v0.0.6 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/natefinch/lumberjack v2.0.0+incompatible // indirect
 	golang.org/x/sys v0.33.0 // indirect

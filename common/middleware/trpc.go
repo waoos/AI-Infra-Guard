@@ -7,7 +7,6 @@ import (
 	"git.code.oa.com/trpc-go/trpc-go/codec"
 	"git.code.oa.com/trpc-go/trpc-go/log"
 	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
-	"github.com/Tencent/AI-Infra-Guard/common/monitoring"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -58,22 +57,8 @@ func TrpcMiddleware() gin.HandlerFunc {
 		// 获取客户端IP
 		clientIP := getClientIP(c)
 
-		// 上报HTTP监控数据到智研
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Errorf("监控函数panic: trace_id=%s, error=%+v", traceID, r)
-				}
-			}()
-
-			monitoring.ReportHTTPMetrics(monitoring.HTTPMetrics{
-				Path:       c.FullPath(),
-				Method:     c.Request.Method,
-				StatusCode: c.Writer.Status(),
-				Duration:   duration,
-				ClientIP:   clientIP,
-			})
-		}()
+		// 监控相关代码已移除
+		_ = clientIP // 避免未使用变量警告
 	}
 }
 
