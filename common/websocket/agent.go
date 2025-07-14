@@ -18,7 +18,7 @@ import (
 
 const (
 	// WebSocket相关常量
-	maxMessageSize    = 512 * 1024 // 512KB
+	maxMessageSize    = 512 * 1024 * 1024 // 512MB
 	pongWait          = 60 * time.Second
 	pingPeriod        = (pongWait * 9) / 10
 	writeWait         = 10 * time.Second
