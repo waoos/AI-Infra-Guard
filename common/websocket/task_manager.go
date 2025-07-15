@@ -804,7 +804,7 @@ func (tm *TaskManager) generateTaskTitle(content string, attachments []string) s
 	}
 
 	// 如果都没有，返回默认标题
-	return "新任务"
+	return "模型越狱评测任务"
 }
 
 // 辅助函数：将interface{}转换为datatypes.JSON
