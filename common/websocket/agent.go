@@ -7,12 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
-	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/gorilla/websocket"
+	"trpc.group/trpc-go/trpc-go/log"
 	// "gorm.io/datatypes"
 )
 
@@ -171,7 +169,6 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 
 		ac.cleanup(am)
 		log.Infof("Agent连接处理结束: agentId=%s, remoteAddr=%s", agentID, remoteAddr)
-		gologger.Infof("Agent连接处理结束: agentId=%s, remoteAddr=%s", agentID, remoteAddr)
 	}()
 
 	// 设置连接参数
@@ -195,10 +192,8 @@ func (ac *AgentConnection) handleConnection(am *AgentManager) {
 
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Errorf("Agent连接异常断开: agentId=%s, error=%v", agentID, err)
-				gologger.Errorf("Agent连接异常断开: agentId=%s, error=%v", agentID, err)
 			} else {
 				log.Infof("Agent连接正常断开: agentId=%s, closeCode=%v", agentID, err)
-				gologger.Infof("Agent连接正常断开: agentId=%s, closeCode=%v", agentID, err)
 			}
 			break
 		}
@@ -285,7 +280,6 @@ func (ac *AgentConnection) handleRegister(am *AgentManager, content interface{})
 	ac.stateMu.Unlock()
 
 	log.Infof("Agent注册成功: agentId=%s, hostname=%s, ip=%s, version=%s", rc.AgentID, rc.Hostname, rc.IP, rc.Version)
-	gologger.Infof("Agent注册成功: agentId=%s, hostname=%s, ip=%s, version=%s", rc.AgentID, rc.Hostname, rc.IP, rc.Version)
 	// 发送注册成功响应
 	response := WSMessage{
 		Type: "register_ack",
@@ -371,7 +365,6 @@ func (ac *AgentConnection) writePump() {
 		err := ac.conn.WriteMessage(websocket.PingMessage, nil)
 		if err != nil {
 			log.Warnf("Agent心跳发送失败,准备重试: agentId=%s, error=%v", agentID, err)
-			gologger.Warnf("Agent心跳发送失败,准备重试: agentId=%s, error=%v", agentID, err)
 
 			// 尝试重试一次
 			time.Sleep(1 * time.Second)
@@ -387,7 +380,6 @@ func (ac *AgentConnection) writePump() {
 			err = ac.conn.WriteMessage(websocket.PingMessage, nil)
 			if err != nil {
 				log.Errorf("Agent心跳重试失败,连接已失效: agentId=%s, error=%v", agentID, err)
-				gologger.Errorf("Agent心跳重试失败,连接已失效: agentId=%s, error=%v", agentID, err)
 
 				// 标记连接为非活跃
 				ac.stateMu.Lock()
@@ -395,7 +387,6 @@ func (ac *AgentConnection) writePump() {
 				ac.stateMu.Unlock()
 
 				log.Errorf("Agent连接已标记为失效: agentId=%s, 原因=心跳失败", agentID)
-				gologger.Errorf("Agent连接已标记为失效: agentId=%s, 原因=心跳失败", agentID)
 				return
 			} else {
 				log.Infof("Agent心跳重试成功: agentId=%s", agentID)
@@ -415,7 +406,6 @@ func (ac *AgentConnection) cleanup(am *AgentManager) {
 	ac.stateMu.Unlock()
 
 	log.Infof("开始清理Agent连接: agentId=%s, wasActive=%v", agentID, wasActive)
-	gologger.Infof("开始清理Agent连接: agentId=%s, wasActive=%v", agentID, wasActive)
 
 	if agentID != "" {
 		am.mu.Lock()
@@ -423,7 +413,6 @@ func (ac *AgentConnection) cleanup(am *AgentManager) {
 		if _, exists := am.connections[agentID]; exists {
 			delete(am.connections, agentID)
 			log.Infof("Agent已从连接管理器中移除: agentId=%s", agentID)
-			gologger.Infof("Agent已从连接管理器中移除: agentId=%s", agentID)
 		} else {
 			log.Warnf("Agent不在连接管理器中，可能已被移除: agentId=%s", agentID)
 		}
@@ -443,7 +432,6 @@ func (ac *AgentConnection) cleanup(am *AgentManager) {
 	}
 
 	log.Infof("Agent连接清理完成: agentId=%s", agentID)
-	gologger.Infof("Agent连接清理完成: agentId=%s", agentID)
 }
 
 // sendError 发送错误响应

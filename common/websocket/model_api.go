@@ -3,10 +3,9 @@ package websocket
 import (
 	"net/http"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
+	"trpc.group/trpc-go/trpc-go/log"
 )
 
 // ModelInfo 模型信息

@@ -7,9 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
-	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
+	"trpc.group/trpc-go/trpc-go/log"
 )
 
 // SSEConnection 表示一个SSE连接
@@ -44,7 +42,6 @@ func (sm *SSEManager) AddConnection(sessionID, username string, w http.ResponseW
 	if existing, exists := sm.connections[sessionID]; exists {
 		// 关闭现有连接
 		close(existing.CloseChan)
-		gologger.Infof("关闭现有连接: sessionId=%s", sessionID)
 		log.Infof("SSE连接冲突，关闭现有连接: sessionId=%s, username=%s", sessionID, username)
 	}
 
@@ -73,7 +70,6 @@ func (sm *SSEManager) AddConnection(sessionID, username string, w http.ResponseW
 	}
 
 	sm.connections[sessionID] = conn
-	gologger.Infof("添加SSE连接: sessionId=%s, username=%s", sessionID, username)
 	log.Infof("SSE连接建立: sessionId=%s, username=%s, totalConnections=%d", sessionID, username, len(sm.connections))
 
 	// 发送连接成功消息
@@ -98,7 +94,7 @@ func (sm *SSEManager) keepConnectionAlive(conn *SSEConnection) {
 	for {
 		select {
 		case <-conn.CloseChan:
-			gologger.Infof("SSE连接已关闭: sessionId=%s", conn.SessionID)
+			log.Infof("SSE连接已关闭: sessionId=%s", conn.SessionID)
 			log.Infof("SSE连接关闭: sessionId=%s, username=%s", conn.SessionID, conn.Username)
 			return
 		case <-ticker.C:
@@ -118,14 +114,12 @@ func (sm *SSEManager) keepConnectionAlive(conn *SSEConnection) {
 
 			eventData, err := json.Marshal(heartbeat)
 			if err != nil {
-				gologger.Errorf("心跳序列化失败: %v", err)
 				log.Errorf("SSE心跳序列化失败: sessionId=%s, error=%v", conn.SessionID, err)
 				continue
 			}
 
 			_, err = fmt.Fprintf(conn.Writer, "data: %s\n\n", eventData)
 			if err != nil {
-				gologger.Errorf("发送心跳失败: %v", err)
 				log.Errorf("SSE心跳发送失败: sessionId=%s, error=%v", conn.SessionID, err)
 				sm.RemoveConnection(conn.SessionID)
 				return
@@ -146,7 +140,6 @@ func (sm *SSEManager) RemoveConnection(sessionID string) {
 	if conn, exists := sm.connections[sessionID]; exists {
 		close(conn.CloseChan)
 		delete(sm.connections, sessionID)
-		gologger.Infof("移除SSE连接: sessionId=%s", sessionID)
 		log.Infof("SSE连接移除: sessionId=%s, username=%s, remainingConnections=%d", sessionID, conn.Username, len(sm.connections))
 	}
 }
@@ -197,7 +190,7 @@ func (sm *SSEManager) sendEventToConnection(conn *SSEConnection, id string, even
 	conn.Flusher.Flush()
 	conn.LastPing = time.Now()
 
-	gologger.Infof("发送事件: sessionId=%s, eventType=%s", conn.SessionID, eventType)
+	log.Infof("发送事件: sessionId=%s, eventType=%s", conn.SessionID, eventType)
 	log.Debugf("SSE事件发送成功: sessionId=%s, eventType=%s, eventId=%s", conn.SessionID, eventType, id)
 	return nil
 }

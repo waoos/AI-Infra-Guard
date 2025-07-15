@@ -8,9 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
 	"github.com/gin-gonic/gin"
+	"trpc.group/trpc-go/trpc-go/log"
 )
 
 // 辅助函数：从gin context中获取trace_id

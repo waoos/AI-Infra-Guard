@@ -15,12 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
-	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
 	"gorm.io/datatypes"
+	"trpc.group/trpc-go/trpc-go/log"
 )
 
 // 任务管理器相关数据结构
@@ -125,18 +123,10 @@ func (tm *TaskManager) AddTask(req *TaskCreateRequest, traceID string) error {
 		// 分发失败，清理内存和数据库中的预存内容
 		tm.cleanupFailedTask(req.SessionID, traceID)
 		log.Errorf("任务分发失败: trace_id=%s, sessionId=%s, error=%v", traceID, req.SessionID, err)
-		gologger.Errorf("任务分发失败: %v", err)
-
-		// 监控相关代码已移除
-
 		return fmt.Errorf("任务分发失败: %v", err)
 	}
 
 	log.Infof("任务添加成功: trace_id=%s, sessionId=%s, taskType=%s", traceID, req.SessionID, req.Task)
-	gologger.Infof("任务添加成功: sessionId=%s, taskType=%s", req.SessionID, req.Task)
-
-	// 监控相关代码已移除
-
 	return nil
 }
 
@@ -174,7 +164,6 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 	task, exists := tm.GetTask(sessionId)
 	if !exists {
 		log.Errorf("任务不存在: trace_id=%s, sessionId=%s", traceID, sessionId)
-		gologger.Errorf("Task not found for sessionId: %s", sessionId)
 		return fmt.Errorf("任务不存在")
 	}
 
@@ -182,7 +171,6 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 	availableAgents := tm.agentManager.GetAvailableAgents()
 	if len(availableAgents) == 0 {
 		log.Warnf("没有可用的Agent: trace_id=%s, sessionId=%s", traceID, sessionId)
-		gologger.Info("No available agents")
 		return fmt.Errorf("没有可用的Agent")
 	}
 
@@ -195,7 +183,6 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 	err := tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, selectedAgent.agentID)
 	if err != nil {
 		log.Errorf("无法更新session的assigned_agent: trace_id=%s, sessionId=%s, agentId=%s, error=%v", traceID, task.SessionID, selectedAgent.agentID, err)
-		gologger.Errorf("无法更新session的assigned_agent: %v", err)
 		return fmt.Errorf("无法更新session的assigned_agent")
 	}
 
@@ -276,21 +263,16 @@ func (tm *TaskManager) dispatchTask(sessionId string, traceID string) error {
 	err = selectedAgent.conn.WriteJSON(taskMsg)
 	if err != nil {
 		log.Errorf("下发任务给Agent失败: trace_id=%s, sessionId=%s, agentId=%s, error=%v", traceID, task.SessionID, agentID, err)
-		gologger.Errorf("下发任务给 %s 失败: %v", agentID, err)
-		// 如果发送失败，重置assigned_agent
-		tm.taskStore.UpdateSessionAssignedAgent(task.SessionID, "")
 		return fmt.Errorf("下发任务给 %s 失败: %v", agentID, err)
 	}
 
 	log.Infof("任务分发成功: trace_id=%s, sessionId=%s, agentId=%s", traceID, task.SessionID, agentID)
-	gologger.Infof("任务下发成功: sessionId=%s, agentId=%s", task.SessionID, agentID)
 	return nil
 }
 
 // HandleAgentEvent 处理来自Agent的事件
 func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, event interface{}) {
 	log.Debugf("收到Agent事件: sessionId=%s, eventType=%s", sessionId, eventType)
-	gologger.Debugf("收到Agent事件: sessionId=%s, eventType=%s", sessionId, eventType)
 
 	// 使用通用事件处理函数
 	tm.handleEvent(sessionId, eventType, event)
@@ -301,49 +283,42 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 		if convertedEvent, err := convertToStruct(event, &LiveStatusEvent{}); err == nil {
 			if liveStatusEvent, ok := convertedEvent.(*LiveStatusEvent); ok {
 				log.Debugf("liveStatus事件详情: sessionId=%s, text=%s", sessionId, liveStatusEvent.Text)
-				gologger.Debugf("liveStatus事件详情: sessionId=%s, text=%s", sessionId, liveStatusEvent.Text)
 			}
 		}
 	case "planUpdate":
 		if convertedEvent, err := convertToStruct(event, &PlanUpdateEvent{}); err == nil {
 			if planUpdateEvent, ok := convertedEvent.(*PlanUpdateEvent); ok {
 				log.Infof("收到计划更新: sessionId=%s, tasks=%d", sessionId, len(planUpdateEvent.Tasks))
-				gologger.Debugf("planUpdate事件详情: sessionId=%s, tasks=%d", sessionId, len(planUpdateEvent.Tasks))
 			}
 		}
 	case "newPlanStep":
 		if convertedEvent, err := convertToStruct(event, &NewPlanStepEvent{}); err == nil {
 			if newPlanStepEvent, ok := convertedEvent.(*NewPlanStepEvent); ok {
 				log.Infof("新计划步骤: sessionId=%s, stepId=%s", sessionId, newPlanStepEvent.StepID)
-				gologger.Debugf("newPlanStep事件详情: sessionId=%s, stepId=%s", sessionId, newPlanStepEvent.StepID)
 			}
 		}
 	case "statusUpdate":
 		if convertedEvent, err := convertToStruct(event, &StatusUpdateEvent{}); err == nil {
 			if statusUpdateEvent, ok := convertedEvent.(*StatusUpdateEvent); ok {
 				log.Infof("状态更新: sessionId=%s, status=%s", sessionId, statusUpdateEvent.AgentStatus)
-				gologger.Debugf("statusUpdate事件详情: sessionId=%s, status=%s", sessionId, statusUpdateEvent.AgentStatus)
 			}
 		}
 	case "toolUsed":
 		if convertedEvent, err := convertToStruct(event, &ToolUsedEvent{}); err == nil {
 			if toolUsedEvent, ok := convertedEvent.(*ToolUsedEvent); ok {
 				log.Infof("工具使用: sessionId=%s, tools=%d", sessionId, len(toolUsedEvent.Tools))
-				gologger.Debugf("toolUsed事件详情: sessionId=%s, tools=%d", sessionId, len(toolUsedEvent.Tools))
 			}
 		}
 	case "actionLog":
 		if convertedEvent, err := convertToStruct(event, &ActionLogEvent{}); err == nil {
 			if actionLogEvent, ok := convertedEvent.(*ActionLogEvent); ok {
 				log.Debugf("动作日志: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
-				gologger.Debugf("actionLog事件详情: sessionId=%s, actionId=%s", sessionId, actionLogEvent.ActionID)
 			}
 		}
 	case "resultUpdate":
 		if convertedEvent, err := convertToStruct(event, &ResultUpdateEvent{}); err == nil {
 			if _, ok := convertedEvent.(*ResultUpdateEvent); ok {
 				log.Infof("任务完成: sessionId=%s", sessionId)
-				gologger.Debugf("resultUpdate事件详情: sessionId=%s", sessionId)
 
 				// 监控相关代码已移除
 
@@ -351,10 +326,8 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 				err := tm.taskStore.UpdateSessionStatus(sessionId, TaskStatusDone)
 				if err != nil {
 					log.Errorf("更新任务状态为已完成失败: sessionId=%s, error=%v", sessionId, err)
-					gologger.Errorf("更新任务状态为已完成失败: %v", err)
 				} else {
 					log.Infof("任务状态已更新为已完成: sessionId=%s", sessionId)
-					gologger.Infof("任务状态已更新为已完成: sessionId=%s", sessionId)
 				}
 				// 任务完成，可以清理资源
 				go tm.cleanupTask(sessionId)
@@ -362,7 +335,6 @@ func (tm *TaskManager) HandleAgentEvent(sessionId string, eventType string, even
 		}
 	default:
 		log.Debugf("未知事件类型: sessionId=%s, eventType=%s", sessionId, eventType)
-		gologger.Debugf("未知事件类型: sessionId=%s, eventType=%s", sessionId, eventType)
 	}
 }
 
@@ -417,7 +389,6 @@ func (tm *TaskManager) handleEvent(sessionId string, eventType string, event int
 	err := tm.taskStore.StoreEvent(id, sessionId, eventType, event, timestamp)
 	if err != nil {
 		log.Errorf("存储事件失败: sessionId=%s, eventType=%s, error=%v", sessionId, eventType, err)
-		gologger.Errorf("存储%s事件失败: %v", eventType, err)
 		return
 	}
 
@@ -427,17 +398,14 @@ func (tm *TaskManager) handleEvent(sessionId string, eventType string, event int
 		// 如果是连接不存在的错误，记录为调试信息而不是错误
 		if strings.Contains(err.Error(), "连接不存在") {
 			log.Debugf("SSE连接已关闭，跳过事件推送: sessionId=%s, eventType=%s", sessionId, eventType)
-			gologger.Debugf("SSE连接已关闭，跳过事件推送: sessionId=%s, eventType=%s", sessionId, eventType)
 		} else {
 			log.Errorf("推送事件到SSE失败: sessionId=%s, eventType=%s, error=%v", sessionId, eventType, err)
-			gologger.Errorf("推送%s事件到SSE失败: %v", eventType, err)
 		}
 		return
 	}
 
 	// 记录日志
 	log.Debugf("事件处理完成: sessionId=%s, eventType=%s", sessionId, eventType)
-	gologger.Debugf("%s事件已处理: sessionId=%s", eventType, sessionId)
 }
 
 // getEventTimestamp 获取事件的时间戳
@@ -530,10 +498,8 @@ func (tm *TaskManager) notifyAgentToTerminate(agentID string, sessionId string, 
 				err := agent.conn.WriteJSON(terminateMsg)
 				if err != nil {
 					log.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
-					gologger.Errorf("发送终止消息给Agent %s失败: %v", agentID, err)
 				} else {
 					log.Infof("终止消息已发送给Agent %s: trace_id=%s, sessionId=%s", agentID, traceID, sessionId)
-					gologger.Infof("终止消息已发送给Agent %s: trace_id=%s, sessionId=%s", agentID, traceID, sessionId)
 				}
 				break
 			}
@@ -557,7 +523,6 @@ func (tm *TaskManager) sendTerminationEvent(sessionId string, traceID string) {
 	tm.handleEvent(sessionId, "statusUpdate", event)
 
 	log.Infof("终止事件已发送: trace_id=%s, sessionId=%s", traceID, sessionId)
-	gologger.Infof("终止事件已发送: trace_id=%s, sessionId=%s", traceID, sessionId)
 }
 
 // generateEventID 生成事件ID
@@ -624,7 +589,6 @@ func (tm *TaskManager) DeleteTask(sessionId string, username string, traceID str
 	err = tm.deleteSessionAttachments(session)
 	if err != nil {
 		log.Errorf("删除附件文件失败: trace_id=%s, sessionId=%s, error=%v", traceID, sessionId, err)
-		gologger.Warnf("删除附件文件失败: %v", err)
 		// 附件删除失败不影响主流程，只记录警告
 	}
 
@@ -637,7 +601,6 @@ func (tm *TaskManager) DeleteTask(sessionId string, username string, traceID str
 	tm.CloseSSESession(sessionId)
 
 	log.Infof("任务删除完成: trace_id=%s, sessionId=%s", traceID, sessionId)
-	gologger.Infof("任务删除完成: trace_id=%s, sessionId=%s", traceID, sessionId)
 	return nil
 }
 
@@ -667,11 +630,9 @@ func (tm *TaskManager) deleteSessionAttachments(session *database.Session) error
 		if err := os.Remove(filePath); err != nil {
 			if !os.IsNotExist(err) {
 				log.Errorf("删除附件文件失败: %s, error: %v", filePath, err)
-				gologger.Warnf("删除附件文件失败: %s, error: %v", filePath, err)
 			}
 		} else {
 			log.Debugf("删除附件文件成功: %s", filePath)
-			gologger.Debugf("删除附件文件成功: %s", filePath)
 		}
 	}
 
@@ -851,7 +812,6 @@ func (tm *TaskManager) cleanupTask(sessionId string) {
 	tm.CloseSSESession(sessionId)
 
 	log.Infof("任务清理完成: sessionId=%s", sessionId)
-	gologger.Infof("任务清理完成: sessionId=%s", sessionId)
 }
 
 // GetTaskDetail 获取任务详情
@@ -900,7 +860,6 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 		// 解析事件数据
 		var eventData map[string]interface{}
 		if err := json.Unmarshal(msg.EventData, &eventData); err != nil {
-			gologger.Warnf("解析消息事件数据失败: %v", err)
 			continue
 		}
 
@@ -916,7 +875,6 @@ func (tm *TaskManager) GetTaskDetail(sessionId string, username string, traceID 
 	var params map[string]interface{}
 	if session.Params != nil {
 		if err := json.Unmarshal(session.Params, &params); err != nil {
-			gologger.Warnf("解析任务参数失败: trace_id=%s, sessionId=%s, error=%v", traceID, sessionId, err)
 			log.Warnf("解析任务参数失败: trace_id=%s, sessionId=%s, error=%v", traceID, sessionId, err)
 			params = make(map[string]interface{})
 		}
@@ -1030,8 +988,8 @@ func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username s
 	log.Debugf("文件下载路径信息: trace_id=%s, fileUrl=%s, fileName=%s, localFileName=%s, filePath=%s",
 		traceID, fileUrl, fileName, localFileName, filePath)
 	// 添加调试日志
-	gologger.Debugf("文件下载调试信息: trace_id=%s, fileUrl=%s, localFileName=%s, filePath=%s, uploadDir=%s",
-		traceID, fileUrl, localFileName, filePath, tm.fileConfig.UploadDir)
+	// gologger.Debugf("文件下载调试信息: trace_id=%s, fileUrl=%s, localFileName=%s, filePath=%s, uploadDir=%s",
+	// 	traceID, fileUrl, localFileName, filePath, tm.fileConfig.UploadDir)
 
 	// 6. 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -1084,7 +1042,6 @@ func (tm *TaskManager) DownloadFile(sessionId string, fileUrl string, username s
 
 	log.Infof("文件下载成功: trace_id=%s, sessionId=%s, fileName=%s, fileSize=%d, transmittedSize=%d",
 		traceID, sessionId, fileName, fileInfo.Size(), written)
-	gologger.Infof("文件下载成功: trace_id=%s, sessionId=%s, fileName=%s, fileSize=%d", traceID, sessionId, fileName, fileInfo.Size())
 
 	return nil
 }

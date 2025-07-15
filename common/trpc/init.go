@@ -1,7 +1,7 @@
 package trpc
 
 import (
-	"git.code.oa.com/trpc-go/trpc-go"
+	"trpc.group/trpc-go/trpc-go"
 )
 
 // InitTrpc 初始化trpc-go

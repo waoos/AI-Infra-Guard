@@ -3,12 +3,9 @@ package middleware
 import (
 	"time"
 
-	"git.code.oa.com/trpc-go/trpc-go"
-	"git.code.oa.com/trpc-go/trpc-go/codec"
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"trpc.group/trpc-go/trpc-go/log"
 )
 
 // TrpcMiddleware 创建trpc-go集成中间件
@@ -19,23 +16,6 @@ func TrpcMiddleware() gin.HandlerFunc {
 
 		// 将trace_id放入gin context
 		c.Set("trace_id", traceID)
-
-		// 保存原始context
-		savedCtx := c.Request.Context()
-
-		// 创建新的trpc message，用于监控、全链路跟踪等场景
-		ctx, msg := codec.WithNewMessage(savedCtx)
-
-		// 设置trpc message信息
-		msg.WithCalleeApp(trpc.GlobalConfig().Server.App)
-		msg.WithCalleeServer(trpc.GlobalConfig().Server.Server)
-		msg.WithCalleeService("")
-		msg.WithCalleeServiceName("")
-		msg.WithCalleeMethod(":" + c.FullPath())
-		msg.WithCalleeContainerName(trpc.GlobalConfig().Global.ContainerName)
-
-		// 通过request context传递span、trpc信息
-		c.Request = c.Request.WithContext(ctx)
 
 		// 记录请求开始时间
 		startTime := time.Now()

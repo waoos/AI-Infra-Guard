@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/gin-gonic/gin"
+	"trpc.group/trpc-go/trpc-go/log"
 )
 
 // RequestLoggerMiddleware 请求参数日志中间件
@@ -88,7 +87,6 @@ func RequestLoggerMiddleware() gin.HandlerFunc {
 		requestJSON, _ := json.Marshal(requestInfo)
 
 		log.Infof("请求接收: trace_id=%s, request_info=%s", traceID, string(requestJSON))
-		gologger.Infof("请求接收: trace_id=%s, request_info=%s", traceID, string(requestJSON))
 
 		// 继续处理请求
 		c.Next()
@@ -98,7 +96,6 @@ func RequestLoggerMiddleware() gin.HandlerFunc {
 		status := c.Writer.Status()
 
 		log.Infof("请求完成: trace_id=%s, status=%d, duration=%v", traceID, status, duration)
-		gologger.Infof("请求完成: trace_id=%s, status=%d, duration=%v", traceID, status, duration)
 	}
 }
 

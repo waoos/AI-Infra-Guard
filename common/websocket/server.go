@@ -5,14 +5,12 @@ import (
 	"mime"
 	"path/filepath"
 
-	"git.code.oa.com/trpc-go/trpc-go/log"
-	_ "git.code.oa.com/trpc-go/trpc-log-zhiyan"
 	"github.com/Tencent/AI-Infra-Guard/common/middleware"
 	"github.com/Tencent/AI-Infra-Guard/common/trpc"
-	"github.com/Tencent/AI-Infra-Guard/internal/gologger"
 	"github.com/Tencent/AI-Infra-Guard/internal/options"
 	"github.com/Tencent/AI-Infra-Guard/pkg/database"
 	"github.com/gin-gonic/gin"
+	"trpc.group/trpc-go/trpc-go/log"
 	// _ "git.code.oa.com/trpc-go/trpc-filter/tracing"
 )
 
@@ -22,7 +20,7 @@ var staticFS embed.FS
 func RunWebServer(options *options.Options) {
 	// 1. 初始化trpc-go
 	if err := trpc.InitTrpc("./trpc_go.yaml"); err != nil {
-		gologger.Fatalf("Trpc-go初始化失败: %v", err)
+		log.Fatalf("Trpc-go初始化失败: %v", err)
 	}
 	log.Infof("Trpc-go initialized successfully: trace_id=system_startup")
 
@@ -39,19 +37,19 @@ func RunWebServer(options *options.Options) {
 	db, err := database.InitDB(dbConfig)
 	if err != nil {
 		log.Errorf("数据库初始化失败: trace_id=system_startup, error=%v", err)
-		gologger.Fatalf("数据库初始化失败: %v", err)
+
 	}
 	taskStore := database.NewTaskStore(db)
 	if err := taskStore.Init(); err != nil {
 		log.Errorf("初始化tasks表失败: trace_id=system_startup, error=%v", err)
-		gologger.Fatalf("初始化tasks表失败: %v", err)
+		log.Fatalf("初始化tasks表失败: %v", err)
 	}
 
 	// 初始化模型存储
 	modelStore := database.NewModelStore(db)
 	if err := modelStore.Init(); err != nil {
 		log.Errorf("初始化models表失败: trace_id=system_startup, error=%v", err)
-		gologger.Fatalf("初始化models表失败: %v", err)
+
 	}
 
 	// 初始化AgentManager
@@ -66,7 +64,7 @@ func RunWebServer(options *options.Options) {
 	// 验证文件上传配置
 	if err := fileConfig.ValidateConfig(); err != nil {
 		log.Errorf("文件上传配置验证失败: trace_id=system_startup, error=%v", err)
-		gologger.Fatalf("文件上传配置验证失败: %v", err)
+
 	}
 
 	// 初始化SSE管理器
@@ -248,10 +246,8 @@ func RunWebServer(options *options.Options) {
 
 	// 启动服务器
 	log.Infof("Starting WebServer: trace_id=system_startup, addr=%s", options.WebServerAddr)
-	gologger.Infof("Starting WebServer on http://%s\n", options.WebServerAddr)
 	if err := r.Run(options.WebServerAddr); err != nil {
 		log.Errorf("Could not start WebSocket server: trace_id=system_startup, error=%s", err)
-		gologger.Fatalf("Could not start WebSocket server: %s\n", err)
 	}
 }
 
