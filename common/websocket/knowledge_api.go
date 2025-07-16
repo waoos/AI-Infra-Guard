@@ -178,10 +178,12 @@ func HandleDeleteFingerprint(c *gin.Context) {
 
 	var deleted []string
 	var notFound []string
+	var invalid []string
 
 	for _, name := range req.Names {
+		// 使用已存在的合法性校验函数防止路径遍历攻击
 		if !isValidName(name) {
-			notFound = append(notFound, name)
+			invalid = append(invalid, name)
 			continue
 		}
 		yamlPath := filepath.Join("data/fingerprints", name+".yaml")
@@ -197,6 +199,9 @@ func HandleDeleteFingerprint(c *gin.Context) {
 	msg := "删除完成"
 	if len(notFound) > 0 {
 		msg += "，部分指纹未找到: " + strings.Join(notFound, ", ")
+	}
+	if len(invalid) > 0 {
+		msg += "，部分指纹名称非法: " + strings.Join(invalid, ", ")
 	}
 
 	c.JSON(http.StatusOK, gin.H{
