@@ -121,7 +121,7 @@ func RunWebServer(options *options.Options) {
 		appSecurity := v1.Group("/app")
 		{
 			// 应用IOA中间件
-			appSecurity.Use(setupIOAMiddleware())
+			appSecurity.Use(setupIdentityMiddleware())
 
 			// 任务管理
 			tasks := appSecurity.Group("/tasks")
@@ -198,20 +198,6 @@ func RunWebServer(options *options.Options) {
 		}
 	}
 
-	// 保持原有路由的兼容性（重定向到新路由）
-	r.GET("/show", func(c *gin.Context) {
-		c.Redirect(301, "/api/v1/knowledge/vulnerabilities")
-	})
-	r.GET("/ws", func(c *gin.Context) {
-		c.Redirect(301, "/api/v1/model-security/ws")
-	})
-	r.GET("/mcp/plugins", func(c *gin.Context) {
-		c.Redirect(301, "/api/v1/app-security/mcp/plugins")
-	})
-	r.GET("/mcp_ws", func(c *gin.Context) {
-		c.Redirect(301, "/api/v1/app-security/mcp/ws")
-	})
-
 	// 静态文件处理
 	r.NoRoute(func(c *gin.Context) {
 		assetPath := "static" + c.Request.URL.Path
@@ -252,7 +238,7 @@ func RunWebServer(options *options.Options) {
 }
 
 // 配置身份认证中间件
-func setupIOAMiddleware() gin.HandlerFunc {
+func setupIdentityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 优先从请求头获取username字段
 		username := c.GetHeader("username")

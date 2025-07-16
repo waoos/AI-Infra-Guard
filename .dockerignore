@@ -34,10 +34,6 @@ Thumbs.db
 # 运行时数据目录（通过卷挂载）
 uploads/
 db/
-logs/
-
-# Polaris日志目录（容器内会重新生成）
-polaris/log/
 
 # 文档和图片（不需要在容器中）
 img/
