@@ -401,7 +401,7 @@ func HandleUploadFile(c *gin.Context, tm *TaskManager) {
 		return
 	}
 
-	// 验证文件
+	// 验证文件,包含文件名和文件内容以及文件扩展的校验，不存在文件路径遍历风险
 	if err := validateFileUpload(file); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  1,

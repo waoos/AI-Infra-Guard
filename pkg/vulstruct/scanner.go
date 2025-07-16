@@ -3,9 +3,10 @@ package vulstruct
 
 import (
 	"fmt"
-	"github.com/Tencent/AI-Infra-Guard/common/fingerprints/parser"
 	"os"
 	"strings"
+
+	"github.com/Tencent/AI-Infra-Guard/common/fingerprints/parser"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,7 +14,7 @@ import (
 // Info represents vulnerability information structure
 // 存储漏洞信息的结构体
 type Info struct {
-	FingerPrintName string   `yaml:"name" json:"-"`                                    // Name of the fingerprint
+	FingerPrintName string   `yaml:"name" json:"name"`                                 // Name of the fingerprint
 	CVEName         string   `yaml:"cve" json:"cve"`                                   // CVE identifier
 	Summary         string   `yaml:"summary" json:"summary"`                           // Brief summary of the vulnerability
 	Details         string   `yaml:"details" json:"details"`                           // Detailed description
