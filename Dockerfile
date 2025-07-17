@@ -18,7 +18,7 @@ RUN go mod download
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o ai-infra-guard ./cmd/cli/main.go
 
 # 第二阶段：运行阶段
-FROM alpine:latest
+FROM alpine:3.19
 
 # 安装运行时依赖
 RUN apk --no-cache add ca-certificates tzdata sqlite bash
@@ -33,33 +33,15 @@ COPY --from=builder /ai-infra-guard/trpc_go.yaml .
 # 复制数据文件到容器中
 COPY --from=builder /ai-infra-guard/data ./data
 
+# 复制启动脚本到镜像中
+COPY start.sh /ai-infra-guard/start.sh
+RUN chmod +x /ai-infra-guard/start.sh && chown root:root /ai-infra-guard/start.sh
+
 # 创建必要的目录并设置权限（仅对镜像内有效）
 RUN mkdir -p /ai-infra-guard/uploads \
     /ai-infra-guard/db && \
     chown -R root:root /ai-infra-guard && \
     chmod -R 755 /ai-infra-guard
-
-# 创建启动脚本
-RUN echo '#!/bin/bash' > /ai-infra-guard/start.sh && \
-    echo 'mkdir -p /ai-infra-guard/db /ai-infra-guard/uploads' >> /ai-infra-guard/start.sh && \
-    echo '' >> /ai-infra-guard/start.sh && \
-    echo 'if [ ! -f /ai-infra-guard/db/tasks.db ]; then' >> /ai-infra-guard/start.sh && \
-    echo '    touch /ai-infra-guard/db/tasks.db' >> /ai-infra-guard/start.sh && \
-    echo 'fi' >> /ai-infra-guard/start.sh && \
-    echo '' >> /ai-infra-guard/start.sh && \
-    echo 'chmod 666 /ai-infra-guard/db/tasks.db 2>/dev/null || true' >> /ai-infra-guard/start.sh && \
-    echo '' >> /ai-infra-guard/start.sh && \
-    echo 'chmod 777 /ai-infra-guard/db 2>/dev/null || true' >> /ai-infra-guard/start.sh && \
-    echo 'chmod 777 /ai-infra-guard/uploads 2>/dev/null || true' >> /ai-infra-guard/start.sh && \
-    echo '' >> /ai-infra-guard/start.sh && \
-    echo 'mkdir -p /ai-infra-guard/logs' >> /ai-infra-guard/start.sh && \
-    echo 'touch /ai-infra-guard/logs/trpc.log' >> /ai-infra-guard/start.sh && \
-    echo 'chmod 666 /ai-infra-guard/logs/trpc.log 2>/dev/null || true' >> /ai-infra-guard/start.sh && \
-    echo 'chmod 777 /ai-infra-guard/logs 2>/dev/null || true' >> /ai-infra-guard/start.sh && \
-    echo '' >> /ai-infra-guard/start.sh && \
-    echo 'exec ./ai-infra-guard webserver' >> /ai-infra-guard/start.sh && \
-    chmod +x /ai-infra-guard/start.sh && \
-    chown root:root /ai-infra-guard/start.sh
 
 # 设置环境变量
 ENV APP_ENV=production
