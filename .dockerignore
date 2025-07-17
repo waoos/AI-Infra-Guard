@@ -50,3 +50,14 @@ License.txt
 
 # 构建脚本
 build_test.sh 
+.idea
+.github
+temp_uploads
+.git
+__pycache__
+*.tar.gz
+logs/*
+.git
+.deepeval
+.deepteam
+.xac
